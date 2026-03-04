@@ -61,6 +61,13 @@ interface ChatCompletionRequest {
   conversationId?: string
   parentId?: string
   isMultiTurn?: boolean
+  sessionContext?: {
+    sessionId: string
+    providerSessionId?: string
+    parentMessageId?: string
+    messages: any[]
+    isNew: boolean
+  }
 }
 
 const accessTokenMap = new Map<string, TokenInfo>()
@@ -298,14 +305,21 @@ export class KimiAdapter {
       }
     }
 
-    const content = this.messagesPrepare(messages, toolsPrompt, request.isMultiTurn)
+    // Use session context passed from forwarder - MUST be defined before messagesPrepare
+    const sessionContext = request.sessionContext
+    const isMultiTurn = sessionContext && !sessionContext.isNew
+    
+    // Use providerSessionId (existing chat_id) if available
+    const chatId = sessionContext?.providerSessionId || ''
+    // Use parentMessageId (previous message id) if available
+    const parentId = sessionContext?.parentMessageId || ''
+
+    console.log(`[Kimi] Model: ${request.model}, chatId: ${chatId || '(new)'}, parentId: ${parentId || '(none)'}, isMultiTurn: ${isMultiTurn}`)
+
+    const content = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
 
     const enableThinking = request.enableThinking ?? false
     const enableWebSearch = request.enableWebSearch ?? false
-    const chatId = request.conversationId || ''
-    const parentId = request.parentId || ''
-
-    console.log(`[Kimi] Model: ${request.model}, thinking: ${enableThinking}, webSearch: ${enableWebSearch}, chatId: ${chatId || '(new)'}, parentId: ${parentId || '(none)'}`)
 
     const jsonBody = JSON.stringify({
       scenario: 'SCENARIO_K2D5',
@@ -439,6 +453,7 @@ export class KimiStreamHandler {
     })
 
     stream.once('close', () => {
+      console.log('[Kimi] Stream closed, realChatId:', this.realChatId, 'lastMessageId:', this.lastMessageId)
       if (!transStream.closed) transStream.end('data: [DONE]\n\n')
     })
 

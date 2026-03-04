@@ -1078,6 +1078,10 @@ class StoreManager {
 
   /**
    * Clean Expired Sessions
+   * Always delete sessions with 'expired' status
+   * For timed-out active sessions, behavior depends on deleteAfterTimeout config:
+   * - If true: Delete them from storage
+   * - If false: Mark them as 'expired' (will be deleted on next clean)
    */
   cleanExpiredSessions(): number {
     this.ensureInitialized()
@@ -1088,17 +1092,35 @@ class StoreManager {
     
     let removedCount = 0
     
-    const remainingSessions = sessions.filter((s: SessionRecord) => {
+    // Always delete sessions that are already expired
+    let remainingSessions = sessions.filter((s: SessionRecord) => {
       if (s.status === 'expired') {
-        removedCount++
-        return false
-      }
-      if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
         removedCount++
         return false
       }
       return true
     })
+    
+    // Handle timed-out active sessions based on config
+    if (config.deleteAfterTimeout) {
+      // Delete timed-out sessions from storage
+      remainingSessions = remainingSessions.filter((s: SessionRecord) => {
+        if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
+          removedCount++
+          return false
+        }
+        return true
+      })
+    } else {
+      // Mark timed-out sessions as expired (will be deleted on next clean)
+      remainingSessions = remainingSessions.map((s: SessionRecord) => {
+        if (s.status === 'active' && (now - s.lastActiveAt) >= timeoutMs) {
+          removedCount++
+          return { ...s, status: 'expired' as const }
+        }
+        return s
+      })
+    }
     
     this.store!.set('sessions', remainingSessions)
     

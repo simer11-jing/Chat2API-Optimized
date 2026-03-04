@@ -78,6 +78,13 @@ interface ChatCompletionRequest {
   tool_choice?: any
   conversationId?: string
   isMultiTurn?: boolean
+  sessionContext?: {
+    sessionId: string
+    providerSessionId?: string
+    parentMessageId?: string
+    messages: any[]
+    isNew: boolean
+  }
 }
 
 const tokenCache = new Map<string, TokenInfo>()
@@ -481,8 +488,12 @@ GLM STRICT RULES:
     }
 
     // Determine multi-turn mode before preparing messages
-    const existingConversationId = request.conversationId || ''
-    const isMultiTurnMode = request.isMultiTurn && !!existingConversationId
+    // Use session context passed from forwarder
+    const sessionContext = request.sessionContext
+    const isMultiTurnMode = sessionContext && !sessionContext.isNew
+    
+    // Use providerSessionId (existing conversation_id) if available
+    const existingConversationId = sessionContext?.providerSessionId || ''
     
     console.log('[GLM] conversationId:', existingConversationId || '(new)', 'isMultiTurn:', isMultiTurnMode)
 

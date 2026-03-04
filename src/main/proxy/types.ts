@@ -233,6 +233,7 @@ export interface ForwardResult {
   error?: string
   latency?: number
   providerSessionId?: string
+  parentMessageId?: string
 }
 
 /**

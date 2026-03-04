@@ -10,6 +10,7 @@ import { Server as HttpServer } from 'http'
 import routes from './routes'
 import { proxyStatusManager } from './status'
 import { storeManager } from '../store/store'
+import { sessionManager } from './sessionManager'
 
 /**
  * Proxy Server Class
@@ -218,6 +219,8 @@ export class ProxyServer {
     }
 
     this.port = port || proxyStatusManager.getPort()
+    
+    sessionManager.initialize()
 
     return new Promise((resolve) => {
       try {
@@ -257,6 +260,8 @@ export class ProxyServer {
     if (!this.server) {
       return false
     }
+    
+    sessionManager.destroy()
 
     return new Promise((resolve) => {
       this.server!.close((err) => {

@@ -9,6 +9,7 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { sessionManager } from '../sessionManager'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
@@ -64,6 +65,13 @@ interface ChatCompletionRequest {
   thinking_budget?: number
   chatId?: string
   isMultiTurn?: boolean
+  sessionContext?: {
+    sessionId: string
+    providerSessionId?: string
+    parentMessageId?: string
+    messages: any[]
+    isNew: boolean
+  }
 }
 
 function uuid(): string {
@@ -193,15 +201,29 @@ export class QwenAiAdapter {
     }
 
     const modelId = this.mapModel(request.model)
-    console.log('[QwenAI] Using model:', modelId)
-    console.log('[QwenAI] isMultiTurn:', request.isMultiTurn, 'chatId:', request.chatId)
 
+    // Use session context passed from forwarder (avoid duplicate getOrCreateSession calls)
+    const sessionContext = request.sessionContext
+    const isMultiTurnEnabled = sessionManager.isMultiTurnEnabled()
+    const isMultiTurn = isMultiTurnEnabled && sessionContext && !sessionContext.isNew
+    
+    console.log('[QwenAI] Session info:', {
+      isMultiTurnEnabled,
+      sessionContextIsNew: sessionContext?.isNew,
+      isMultiTurn,
+      providerSessionId: sessionContext?.providerSessionId,
+      parentMessageId: sessionContext?.parentMessageId,
+    })
+    
     // Reuse existing chat or create new one
-    let chatId = request.chatId || ''
-    if (request.isMultiTurn && chatId) {
-      console.log('[QwenAI] Reusing existing chat:', chatId)
+    let chatId = sessionContext?.providerSessionId || ''
+    const parentId = sessionContext?.parentMessageId || null
+    
+    if (isMultiTurn && chatId) {
+      console.log('[QwenAI] Reusing existing chat:', chatId, 'parentId:', parentId)
     } else {
       chatId = await this.createChat(modelId, 'OpenAI_API_Chat')
+      console.log('[QwenAI] Created new chat:', chatId)
     }
 
     const messages = request.messages
@@ -259,11 +281,11 @@ export class QwenAiAdapter {
       chat_id: chatId,
       chat_mode: 'normal',
       model: modelId,
-      parent_id: null,
+      parent_id: parentId || null,
       messages: [
         {
           fid,
-          parentId: null,
+          parentId: parentId || null,
           childrenIds: [childId],
           role: 'user',
           content: userContent,

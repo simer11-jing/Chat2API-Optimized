@@ -119,8 +119,10 @@ export function processStreamContent(
                      state.contentBuffer.startsWith('function_calls]') ||
                      /\[call[:=]?/.test(state.contentBuffer.substring(0, 50))
     
-    // Check if buffer could be a prefix of function_calls]
+    // Check if buffer could be a prefix of function_calls] or [function_calls]
+    // This handles cases where buffer is just "[" or "function" etc.
     const couldBeFunctionCallsPrefix = 'function_calls]'.startsWith(state.contentBuffer) ||
+                                        '[function_calls]'.startsWith(state.contentBuffer) ||
                                         state.contentBuffer.startsWith('function')
 
     if (!hasFullMarker && !isPrefix && !couldBeFunctionCallsPrefix) {

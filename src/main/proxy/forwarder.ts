@@ -60,6 +60,16 @@ export class RequestForwarder {
       return { messages, tools }
     }
 
+    // Check injection mode from config
+    const config = storeManager.getConfig()
+    const injectionMode = config.toolPromptConfig?.mode || 'smart'
+    
+    // If mode is 'never', skip injection
+    if (injectionMode === 'never') {
+      console.log('[Forwarder] Tool prompt injection disabled (mode=never), skipping transformation')
+      return { messages, tools: undefined }
+    }
+
     // Check if tool prompt has already been injected by client (e.g., Cherry Studio)
     if (hasToolPromptInjected(messages)) {
       console.log('[Forwarder] Tool prompt already injected by client, skipping transformation')
@@ -119,22 +129,18 @@ export class RequestForwarder {
     const config = storeManager.getConfig()
     const maxRetries = config.retryCount
 
+    const sessionContext = sessionManager.getOrCreateSession({
+      providerId: provider.id,
+      accountId: account.id,
+      model: actualModel,
+    })
+
     let lastError: string | undefined
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
         await this.delay(5000)
       }
-
-      // Get or create session inside the retry loop
-      // This ensures we get a fresh session if the previous one was deleted
-      const sessionContext = sessionManager.getOrCreateSession({
-        providerId: provider.id,
-        accountId: account.id,
-        model: actualModel,
-      })
-
-      const isMultiTurn = sessionManager.isMultiTurnEnabled() && !sessionContext.isNew
 
       // When starting a new session, only send the last user message
       // This prevents sending conversation history from the previous session
@@ -148,8 +154,9 @@ export class RequestForwarder {
         console.log('[Forwarder] New session detected, sending only last user message')
       }
 
-      // Save user message to session (only on first attempt)
-      if (attempt === 0 && sessionContext.sessionId && request.messages && request.messages.length > 0) {
+      // Save user message to session (only for multi-turn mode and first attempt)
+      const isMultiTurnEnabled = sessionManager.isMultiTurnEnabled()
+      if (isMultiTurnEnabled && attempt === 0 && sessionContext.sessionId && request.messages && request.messages.length > 0) {
         const lastUserMessage = request.messages[request.messages.length - 1]
         if (lastUserMessage.role === 'user') {
           sessionManager.addMessage(sessionContext.sessionId, {
@@ -161,25 +168,19 @@ export class RequestForwarder {
       }
 
       try {
-        const result = await this.doForward(
-          modifiedRequest, 
-          account, 
-          provider, 
-          actualModel, 
-          context,
-          {
-            providerSessionId: sessionContext.providerSessionId,
-            parentMessageId: sessionContext.parentMessageId,
-            isMultiTurn,
-            sessionId: sessionContext.sessionId,
-          }
-        )
+        const result = await this.doForward(modifiedRequest, account, provider, actualModel, context, sessionContext)
 
         if (result.success) {
           if (result.providerSessionId) {
             sessionManager.updateProviderSessionId(
               sessionContext.sessionId,
               result.providerSessionId
+            )
+          }
+          if (result.parentMessageId) {
+            sessionManager.updateParentMessageId(
+              sessionContext.sessionId,
+              result.parentMessageId
             )
           }
           return result
@@ -211,48 +212,43 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     context: ProxyContext,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-      sessionId?: string
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     const startTime = Date.now()
 
     // Check if it is a DeepSeek provider, use dedicated adapter
     if (DeepSeekAdapter.isDeepSeekProvider(provider)) {
-      return this.forwardDeepSeek(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardDeepSeek(request, account, provider, actualModel, startTime)
     }
 
     // Check if it is a GLM provider, use dedicated adapter
     if (GLMAdapter.isGLMProvider(provider)) {
-      return this.forwardGLM(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardGLM(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     // Check if it is a Kimi provider, use dedicated adapter
     if (KimiAdapter.isKimiProvider(provider)) {
-      return this.forwardKimi(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardKimi(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     // Check if it is a Qwen provider, use dedicated adapter
     if (QwenAdapter.isQwenProvider(provider)) {
-      return this.forwardQwen(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardQwen(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     // Check if it is a Qwen AI (International) provider, use dedicated adapter
     if (QwenAiAdapter.isQwenAiProvider(provider)) {
-      return this.forwardQwenAi(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardQwenAi(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     // Check if it is a Z.ai provider, use dedicated adapter
     if (ZaiAdapter.isZaiProvider(provider)) {
-      return this.forwardZai(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardZai(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     // Check if it is a MiniMax provider, use dedicated adapter
     if (MiniMaxAdapter.isMiniMaxProvider(provider)) {
-      return this.forwardMiniMax(request, account, provider, actualModel, startTime, sessionParams)
+      return this.forwardMiniMax(request, account, provider, actualModel, startTime, sessionContext)
     }
 
     try {
@@ -328,13 +324,7 @@ export class RequestForwarder {
     account: Account,
     provider: Provider,
     actualModel: string,
-    startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-      sessionId?: string
-    }
+    startTime: number
   ): Promise<ForwardResult> {
     try {
       // Transform request for prompt-based tool calling if needed
@@ -351,9 +341,6 @@ export class RequestForwarder {
         messages: transformedRequest.messages as any,
         stream: transformedRequest.stream,
         temperature: transformedRequest.temperature,
-        sessionId: sessionParams.providerSessionId,
-        parentMessageId: sessionParams.parentMessageId,
-        isMultiTurn: sessionParams.isMultiTurn,
       })
 
       const latency = Date.now() - startTime
@@ -393,49 +380,6 @@ export class RequestForwarder {
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
-        
-        // Handle stream errors - clear session and cache on error
-        const localSessionId = sessionParams.sessionId
-        transformedStream.on('error', (err) => {
-          console.log('[DeepSeek] Stream error:', err.message)
-          // Clear session and cache to force new session on retry
-          if (localSessionId) {
-            sessionManager.deleteSession(localSessionId)
-          }
-          DeepSeekAdapter.clearSessionCache(account.id)
-        })
-        
-        // For DeepSeek, we need to update parentMessageId after stream ends
-        transformedStream.on('end', () => {
-          // Check if session was deleted on the web (session not found error)
-          if (handler.hasSessionError()) {
-            console.log('[DeepSeek] Session error detected, clearing local session and cache')
-            if (localSessionId) {
-              sessionManager.deleteSession(localSessionId)
-            }
-            // Clear DeepSeek adapter's internal session cache
-            DeepSeekAdapter.clearSessionCache(account.id)
-            return
-          }
-          
-          // Check if we received any content - if not, the session might be invalid
-          // This can happen when the session was deleted on the web but we still have the ID locally
-          // We clear the session if no content was received, regardless of whether we got a message ID
-          if (!handler.hasReceivedContent()) {
-            console.log('[DeepSeek] No content received, session might be invalid, clearing local session and cache')
-            if (localSessionId) {
-              sessionManager.deleteSession(localSessionId)
-            }
-            DeepSeekAdapter.clearSessionCache(account.id)
-            return
-          }
-          
-          const responseMessageId = handler.getMessageId()
-          // Update session with response message ID for next request
-          if (localSessionId && responseMessageId) {
-            sessionManager.updateParentMessageId(localSessionId, responseMessageId)
-          }
-        })
         
         return {
           success: true,
@@ -479,13 +423,6 @@ export class RequestForwarder {
       }
     } catch (error) {
       const latency = Date.now() - startTime
-      // Clear session and cache on error to force new session on retry
-      const localSessionId = sessionParams.sessionId
-      if (localSessionId) {
-        sessionManager.deleteSession(localSessionId)
-      }
-      DeepSeekAdapter.clearSessionCache(account.id)
-      console.log('[DeepSeek] Error in forwardDeepSeek, cleared session and cache:', error instanceof Error ? error.message : 'Unknown error')
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -503,12 +440,7 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-      sessionId?: string
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
       // Transform request for prompt-based tool calling if needed
@@ -528,8 +460,13 @@ export class RequestForwarder {
         web_search: transformedRequest.web_search,
         reasoning_effort: transformedRequest.reasoning_effort,
         deep_research: transformedRequest.deep_research,
-        conversationId: sessionParams.providerSessionId,
-        isMultiTurn: sessionParams.isMultiTurn,
+        sessionContext: {
+          sessionId: sessionContext.sessionId,
+          providerSessionId: sessionContext.providerSessionId,
+          parentMessageId: sessionContext.parentMessageId,
+          messages: sessionContext.messages,
+          isNew: sessionContext.isNew,
+        },
       })
 
       const latency = Date.now() - startTime
@@ -555,31 +492,31 @@ export class RequestForwarder {
         }
       }
 
-      const handler = new GLMStreamHandler(actualModel, undefined, sessionParams.providerSessionId)
+      const handler = new GLMStreamHandler(actualModel)
       
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // For GLM, conversation_id is extracted during stream processing
-        // We need to update the session after stream ends
-        const sessionId = sessionParams.sessionId
+        // Listen for stream end to update provider session ID
         transformedStream.on('end', () => {
           const convId = handler.getConversationId()
-          if (sessionId && convId) {
-            sessionManager.updateProviderSessionId(sessionId, convId)
+          if (convId && sessionContext.sessionId) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
           }
         })
         
         // If delete session after chat is enabled, we need to handle it after stream ends
         if (shouldDeleteSession()) {
-          transformedStream.on('end', () => {
+          const originalEnd = transformedStream.end.bind(transformedStream)
+          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             const convId = handler.getConversationId()
             if (convId) {
               adapter.deleteConversation(convId).catch(err => {
                 console.error('[GLM] Failed to delete session:', err)
               })
             }
-          })
+            return originalEnd(chunk, encoding, callback)
+          }
         }
         
         return {
@@ -589,11 +526,17 @@ export class RequestForwarder {
           stream: transformedStream,
           skipTransform: true,
           latency,
-          providerSessionId: sessionParams.providerSessionId, // Return initial ID, will be updated after stream ends
+          providerSessionId: sessionContext.providerSessionId || handler.getConversationId(),
         }
       }
 
       const result = await handler.handleNonStream(response.data)
+      
+      // Update provider session ID for non-stream response
+      const convId = handler.getConversationId()
+      if (convId && sessionContext.sessionId) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, convId)
+      }
       
       // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
@@ -639,12 +582,7 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-      sessionId?: string
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
       // Transform request for prompt-based tool calling if needed
@@ -658,9 +596,13 @@ export class RequestForwarder {
         temperature: request.temperature,
         enableThinking: !!request.reasoning_effort,
         enableWebSearch: !!request.web_search,
-        conversationId: sessionParams.providerSessionId,
-        parentId: sessionParams.parentMessageId,
-        isMultiTurn: sessionParams.isMultiTurn,
+        sessionContext: {
+          sessionId: sessionContext.sessionId,
+          providerSessionId: sessionContext.providerSessionId,
+          parentMessageId: sessionContext.parentMessageId,
+          messages: sessionContext.messages,
+          isNew: sessionContext.isNew,
+        },
       })
 
       const latency = Date.now() - startTime
@@ -680,37 +622,32 @@ export class RequestForwarder {
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // For Kimi, the real chat_id and message_id are extracted during stream processing
-        // We need to update the session after stream ends
-        const sessionId = sessionParams.sessionId
+        // Listen for stream end to update parent message ID and provider session ID
         transformedStream.on('end', () => {
-          // Check if session was deleted on the web (session not found error)
-          if (handler.hasSessionError()) {
-            console.log('[Kimi] Session error detected, clearing local session')
-            if (sessionId) {
-              sessionManager.deleteSession(sessionId)
-            }
-            return
-          }
-          
-          const realChatId = handler.getConversationId()
           const lastMessageId = handler.getLastMessageId()
-          // Update session with real chat_id and last message id
-          if (sessionId && realChatId && realChatId.startsWith('kimi-') === false) {
-            sessionManager.updateProviderSessionId(sessionId, realChatId, lastMessageId || undefined)
+          const realChatId = handler.getConversationId()
+          console.log('[Kimi] Stream end event, realChatId:', realChatId, 'lastMessageId:', lastMessageId, 'sessionId:', sessionContext.sessionId)
+          if (lastMessageId && sessionContext.sessionId) {
+            sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
+          }
+          // Update provider session ID with real chat_id from response
+          if (realChatId && sessionContext.sessionId && !realChatId.startsWith('kimi-')) {
+            sessionManager.updateProviderSessionId(sessionContext.sessionId, realChatId)
           }
         })
         
-        // Delete conversation if needed
+        // Add delete conversation callback if needed
         if (shouldDeleteSession()) {
-          transformedStream.on('end', () => {
+          const originalEnd = transformedStream.end.bind(transformedStream)
+          transformedStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             const realChatId = handler.getConversationId()
             if (realChatId && realChatId.startsWith('kimi-') === false) {
               adapter.deleteConversation(realChatId).catch(err => {
                 console.error('[Kimi] Failed to delete conversation:', err)
               })
             }
-          })
+            return originalEnd(chunk, encoding, callback)
+          }
         }
         
         return {
@@ -720,11 +657,23 @@ export class RequestForwarder {
           stream: transformedStream,
           skipTransform: true,
           latency,
-          providerSessionId: conversationId, // Return initial ID, will be updated after stream ends
+          // Use existing providerSessionId if available, otherwise wait for stream to extract real chat_id
+          providerSessionId: sessionContext.providerSessionId || undefined,
         }
       }
 
       const result = await handler.handleNonStream(response.data)
+      
+      // Update parent message ID and provider session ID for non-stream response
+      const lastMessageId = handler.getLastMessageId()
+      const realChatId = handler.getConversationId()
+      if (lastMessageId && sessionContext.sessionId) {
+        sessionManager.updateParentMessageId(sessionContext.sessionId, lastMessageId)
+      }
+      // Update provider session ID with real chat_id from response
+      if (realChatId && sessionContext.sessionId && !realChatId.startsWith('kimi-')) {
+        sessionManager.updateProviderSessionId(sessionContext.sessionId, realChatId)
+      }
 
       // Parse tool calls from response content if using prompt-based tool calling
       if (request.tools && request.tools.length > 0 && !isNativeFunctionCallingModel(request.model)) {
@@ -773,12 +722,7 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-      sessionId?: string
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
       // Transform request for prompt-based tool calling if needed
@@ -790,13 +734,18 @@ export class RequestForwarder {
       }
 
       const adapter = new QwenAdapter(provider, account)
-      const { response, sessionId } = await adapter.chatCompletion({
+      const { response, sessionId, reqId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformedRequest.messages as any,
         stream: request.stream,
         temperature: request.temperature,
-        session_id: sessionParams.providerSessionId,
-        isMultiTurn: sessionParams.isMultiTurn,
+        sessionContext: {
+          sessionId: sessionContext.sessionId,
+          providerSessionId: sessionContext.providerSessionId,
+          parentMessageId: sessionContext.parentMessageId,
+          messages: sessionContext.messages,
+          isNew: sessionContext.isNew,
+        },
       })
 
       const latency = Date.now() - startTime
@@ -825,15 +774,13 @@ export class RequestForwarder {
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data, response)
-
-        // Check for session error after stream ends
-        const sessionId = sessionParams.sessionId
+        
+        // Listen for stream end to update parent message ID using the reqId
+        // IMPORTANT: parentMessageId should be the reqId of the previous request
         transformedStream.on('end', () => {
-          if (handler.hasSessionError()) {
-            console.log('[Qwen] Session error detected, clearing local session')
-            if (sessionId) {
-              sessionManager.deleteSession(sessionId)
-            }
+          if (reqId && sessionContext.sessionId) {
+            // Update parent message ID using the reqId for the next request
+            sessionManager.updateParentMessageId(sessionContext.sessionId, reqId)
           }
         })
 
@@ -862,6 +809,11 @@ export class RequestForwarder {
         }
       }
 
+      // Update parent message ID for non-stream response using the reqId
+      if (reqId && sessionContext.sessionId) {
+        sessionManager.updateParentMessageId(sessionContext.sessionId, reqId)
+      }
+
       const sid = handler.getSessionId()
       if (deleteSessionCallback && sid) {
         await deleteSessionCallback(sid)
@@ -873,7 +825,7 @@ export class RequestForwarder {
         headers: this.extractHeaders(response.headers),
         body: result,
         latency,
-        providerSessionId: handler.getSessionId(),
+        providerSessionId: sessionId,
       }
     } catch (error) {
       const latency = Date.now() - startTime
@@ -894,25 +846,26 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     try {
       // Transform request for prompt-based tool calling if needed
       const transformed = this.transformRequestForPromptToolUse(request)
       
       const adapter = new QwenAiAdapter(provider, account)
-      const { response, chatId } = await adapter.chatCompletion({
+      const { response, chatId, parentId } = await adapter.chatCompletion({
         model: actualModel,
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
         enable_thinking: !!request.reasoning_effort,
-        chatId: sessionParams.providerSessionId,
-        isMultiTurn: sessionParams.isMultiTurn,
+        sessionContext: {
+          sessionId: sessionContext.sessionId,
+          providerSessionId: sessionContext.providerSessionId,
+          parentMessageId: sessionContext.parentMessageId,
+          messages: sessionContext.messages,
+          isNew: sessionContext.isNew,
+        },
       })
 
       const latency = Date.now() - startTime
@@ -942,6 +895,15 @@ export class RequestForwarder {
 
       if (request.stream) {
         const transformedStream = await handler.handleStream(response.data)
+
+        // Listen for stream end to get the response ID and update parent message ID
+        transformedStream.on('end', () => {
+          const responseId = handler.getResponseId()
+          if (responseId && sessionContext.sessionId) {
+            // Update parent message ID using the existing session context
+            sessionManager.updateParentMessageId(sessionContext.sessionId, responseId)
+          }
+        })
 
         return {
           success: true,
@@ -999,12 +961,7 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-      sessionId?: string
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     console.log('[forwardZai] actualModel:', actualModel)
     console.log('[forwardZai] provider.modelMappings:', provider.modelMappings)
@@ -1020,9 +977,13 @@ export class RequestForwarder {
         temperature: request.temperature,
         web_search: request.web_search,
         reasoning_effort: request.reasoning_effort,
-        chatId: sessionParams.providerSessionId,
-        parentMessageId: sessionParams.parentMessageId,
-        isMultiTurn: sessionParams.isMultiTurn,
+        sessionContext: {
+          sessionId: sessionContext.sessionId,
+          providerSessionId: sessionContext.providerSessionId,
+          parentMessageId: sessionContext.parentMessageId,
+          messages: sessionContext.messages,
+          isNew: sessionContext.isNew,
+        },
       })
 
       const latency = Date.now() - startTime
@@ -1053,12 +1014,14 @@ export class RequestForwarder {
       if (request.stream !== false) {
         const transformedStream = await handler.handleStream(response.data)
         
-        // For Z.ai, parentMessageId should be the requestId of the previous request
-        // After stream ends, save the current requestId as parentMessageId for next request
-        const sessionId = sessionParams.sessionId
-        if (sessionId && requestId) {
-          sessionManager.updateParentMessageId(sessionId, requestId)
-        }
+        // Listen for stream end to update parent message ID using the requestId
+        // IMPORTANT: parentMessageId should be the requestId of the previous request, not the assistant message ID
+        transformedStream.on('end', () => {
+          if (requestId && sessionContext.sessionId) {
+            // Update parent message ID using the requestId for the next request
+            sessionManager.updateParentMessageId(sessionContext.sessionId, requestId)
+          }
+        })
         
         return {
           success: true,
@@ -1083,6 +1046,12 @@ export class RequestForwarder {
           result.choices[0].message.content = null
           result.choices[0].finish_reason = 'tool_calls'
         }
+      }
+      
+      // Update parent message ID for non-stream response using the requestId
+      // IMPORTANT: parentMessageId should be the requestId of the previous request, not the assistant message ID
+      if (requestId && sessionContext.sessionId) {
+        sessionManager.updateParentMessageId(sessionContext.sessionId, requestId)
       }
       
       if (deleteChatCallback) {
@@ -1116,11 +1085,7 @@ export class RequestForwarder {
     provider: Provider,
     actualModel: string,
     startTime: number,
-    sessionParams: {
-      providerSessionId?: string
-      parentMessageId?: string
-      isMultiTurn: boolean
-    }
+    sessionContext: { sessionId: string; providerSessionId?: string; parentMessageId?: string; messages: any[]; isNew: boolean }
   ): Promise<ForwardResult> {
     console.log('[forwardMiniMax] actualModel:', actualModel)
     console.log('[forwardMiniMax] provider.modelMappings:', provider.modelMappings)
@@ -1134,8 +1099,13 @@ export class RequestForwarder {
         messages: transformed.messages as any,
         stream: request.stream,
         temperature: request.temperature,
-        chatId: sessionParams.providerSessionId,
-        isMultiTurn: sessionParams.isMultiTurn,
+        sessionContext: {
+          sessionId: sessionContext.sessionId,
+          providerSessionId: sessionContext.providerSessionId,
+          parentMessageId: sessionContext.parentMessageId,
+          messages: sessionContext.messages,
+          isNew: sessionContext.isNew,
+        },
       })
 
       const latency = Date.now() - startTime
@@ -1164,7 +1134,7 @@ export class RequestForwarder {
         console.log('[forwardMiniMax] Using polling stream')
         
         if (deleteChatCallback) {
-          const originalStream = stream.stream as PassThrough
+          const originalStream = stream.stream as unknown as PassThrough
           const originalEnd = originalStream.end.bind(originalStream)
           originalStream.end = function(chunk?: any, encoding?: any, callback?: any) {
             deleteChatCallback(chatId).catch(err => {

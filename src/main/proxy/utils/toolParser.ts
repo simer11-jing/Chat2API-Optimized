@@ -89,9 +89,14 @@ export function parseToolCallsFromText(text: string, modelType: string = 'defaul
   }
 
   // Prepend missing opening bracket if needed
+  // Find function_calls] that is not preceded by [ or / and add the missing bracket
+  // This handles cases like "text\nfunction_calls]" or just "function_calls]"
   let processedText = normalizedText
-  if (!processedText.includes('[function_calls]') && processedText.includes('function_calls]')) {
-    processedText = '[' + processedText
+  // Match function_calls] that is not preceded by [ or / (to avoid matching [/function_calls])
+  const missingBracketRegex = /(^|[^\/\[])(function_calls\])/g
+  if (!processedText.includes('[function_calls]') && missingBracketRegex.test(processedText)) {
+    // Replace function_calls] with [function_calls] when not preceded by [ or /
+    processedText = processedText.replace(/(^|[^\/\[])(function_calls\])/g, '$1[$2')
     console.log('[ToolParser] Prepended opening bracket, processedText:', processedText.substring(0, 100))
   }
 

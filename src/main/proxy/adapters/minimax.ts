@@ -76,6 +76,13 @@ interface ChatCompletionRequest {
   tool_choice?: any
   chatId?: string
   isMultiTurn?: boolean
+  sessionContext?: {
+    sessionId: string
+    providerSessionId?: string
+    parentMessageId?: string
+    messages: any[]
+    isNew: boolean
+  }
 }
 
 interface DeviceInfo {
@@ -543,7 +550,23 @@ export class MiniMaxAdapter {
     
     const deviceInfo = await this.requestDeviceInfo()
     
-    const messages = [...request.messages]
+    // Use session context passed from forwarder
+    const sessionContext = request.sessionContext
+    const isMultiTurn = sessionContext && !sessionContext.isNew
+    
+    // Use providerSessionId (existing chat_id) if available
+    let chatId: string = sessionContext?.providerSessionId || ''
+    
+    console.log('[MiniMax] Session info:', {
+      isMultiTurn,
+      chatId: chatId || '(new)',
+    })
+    
+    // In multi-turn mode, only send the last user message
+    // MiniMax will use the chat_id to maintain conversation context
+    const messages = isMultiTurn && chatId 
+      ? [request.messages[request.messages.length - 1]] 
+      : [...request.messages]
     
     let toolsPrompt = ''
     // Only inject if tools are provided and not already injected by client
@@ -562,9 +585,8 @@ export class MiniMaxAdapter {
       }
     }
     
-    const requestBody = this.messagesPrepare(messages, toolsPrompt, request.isMultiTurn)
+    const requestBody = this.messagesPrepare(messages, toolsPrompt, isMultiTurn)
     
-    let chatId: string = request.chatId || ''
     let msgId: string = ''
     
     if (chatId) {
@@ -606,10 +628,17 @@ export class MiniMaxAdapter {
     }
     
     if (request.stream !== false) {
-      // Only delete chat if not in multi-turn mode
-      const onEnd = request.isMultiTurn ? undefined : async (chatId: string) => {
-        await this.deleteChat(chatId)
+      // Only delete chat in single-turn mode with deleteAfterChat enabled
+      // Import shouldDeleteSession from forwarder
+      const shouldDeleteSession = () => {
+        const config = (global as any).storeManager?.getConfig()
+        return config?.mode === 'single' && config?.deleteAfterTimeout
       }
+      
+      const onEnd = shouldDeleteSession() ? async (chatId: string) => {
+        await this.deleteChat(chatId)
+      } : undefined
+      
       const transStream = this.createPollingStream(chatId, deviceInfo, this.model, onEnd)
       return { 
         response: null, 
@@ -619,6 +648,16 @@ export class MiniMaxAdapter {
     }
     
     const aiMessage = await this.pollForResponse(chatId, deviceInfo)
+    
+    // Delete chat after response if in single-turn mode with deleteAfterChat enabled
+    const shouldDeleteSession = () => {
+      const config = (global as any).storeManager?.getConfig()
+      return config?.mode === 'single' && config?.deleteAfterTimeout
+    }
+    
+    if (shouldDeleteSession()) {
+      await this.deleteChat(chatId).catch(err => console.error('[MiniMax] Failed to delete chat:', err))
+    }
     
     const content = aiMessage?.msg_content || ''
     const { content: cleanContent, toolCalls } = parseToolCallsFromText(content, 'minimax')

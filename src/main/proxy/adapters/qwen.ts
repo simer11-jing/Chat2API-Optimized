@@ -62,6 +62,13 @@ interface ChatCompletionRequest {
   temperature?: number
   session_id?: string
   isMultiTurn?: boolean
+  sessionContext?: {
+    sessionId: string
+    providerSessionId?: string
+    parentMessageId?: string
+    messages: any[]
+    isNew: boolean
+  }
 }
 
 function uuid(separator: boolean = true): string {
@@ -131,17 +138,37 @@ export class QwenAdapter {
       throw new Error('Qwen ticket not configured, please add ticket in account settings')
     }
 
+    // Use session context passed from forwarder
+    const sessionContext = request.sessionContext
+    const isMultiTurn = sessionContext && !sessionContext.isNew
+    
     const reqId = uuid(false)
-    const sessionId = request.session_id || uuid(false)
+    // Use providerSessionId (existing session_id from Qwen) if available
+    const sessionId = sessionContext?.providerSessionId || uuid(false)
+    // Use parentMessageId (previous req_id) if available
+    const parentReqId = sessionContext?.parentMessageId || '0'
+    
     const actualModel = this.mapModel(request.model)
     
+    console.log('[Qwen] Session info:', {
+      isMultiTurn,
+      sessionId,
+      reqId,
+      parentReqId,
+    })
     console.log('[Qwen] Using model:', actualModel)
 
     // Find system message and user message
     let systemPrompt = ''
     let userContent = ''
     
-    for (const msg of request.messages) {
+    // In multi-turn mode, only process the last user message
+    // Qwen will use the session_id to maintain conversation context
+    const messagesToProcess = isMultiTurn && sessionId
+      ? [request.messages[request.messages.length - 1]]
+      : request.messages
+    
+    for (const msg of messagesToProcess) {
       if (msg.role === 'system') {
         systemPrompt = extractTextContent(msg.content)
       } else if (msg.role === 'user') {
@@ -185,9 +212,9 @@ export class QwenAdapter {
         }
       ],
       from: 'default',
-      parent_req_id: '0',
+      parent_req_id: parentReqId,
       biz_data: '{"entryPoint":"tongyigw"}',
-      scene_param: request.session_id ? 'follow_up' : 'first_turn',
+      scene_param: isMultiTurn ? 'continue_chat' : 'first_turn',
       chat_client: 'h5',
       client_tm: timestamp.toString(),
       protocol_version: 'v2',

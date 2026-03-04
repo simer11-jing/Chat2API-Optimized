@@ -308,96 +308,98 @@ export function SessionManagement() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5" />
-                {t('session.activeSessions')}
-              </CardTitle>
-              <CardDescription>
-                {t('session.activeSessionsDescription')}
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={loadSessions}
-                disabled={isLoading}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                {t('common.refresh')}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCleanExpired}
-              >
-                {t('session.cleanExpired')}
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleClearAllSessions}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                {t('session.clearAll')}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {sessions.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>{t('session.noSessions')}</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="grid grid-cols-6 gap-2 text-sm font-medium text-muted-foreground pb-2 border-b">
-                <div>{t('session.provider')}</div>
-                <div>{t('session.account')}</div>
-                <div>{t('session.model')}</div>
-                <div>{t('session.messages')}</div>
-                <div>{t('session.lastActive')}</div>
-                <div>{t('common.actions')}</div>
+      {config.mode === 'multi' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5" />
+                  {t('session.activeSessions')}
+                </CardTitle>
+                <CardDescription>
+                  {t('session.activeSessionsDescription')}
+                </CardDescription>
               </div>
-              
-              {sessions.map((session) => {
-                const status = getSessionStatus(session)
-                return (
-                  <div
-                    key={session.id}
-                    className="grid grid-cols-6 gap-2 text-sm py-2 border-b items-center"
-                  >
-                    <div className="truncate">{session.providerId}</div>
-                    <div className="truncate">{session.accountId}</div>
-                    <div className="truncate">{session.model || '-'}</div>
-                    <div className="flex items-center gap-2">
-                      {getStatusBadge(status)}
-                      <span>{session.messages.length}</span>
-                    </div>
-                    <div className="text-muted-foreground">
-                      {formatTime(session.lastActiveAt)}
-                    </div>
-                    <div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteSession(session.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadSessions}
+                  disabled={isLoading}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  {t('common.refresh')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCleanExpired}
+                >
+                  {t('session.cleanExpired')}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleClearAllSessions}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  {t('session.clearAll')}
+                </Button>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardHeader>
+          <CardContent>
+            {sessions.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <Info className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>{t('session.noSessions')}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-6 gap-2 text-sm font-medium text-muted-foreground pb-2 border-b">
+                  <div>{t('session.provider')}</div>
+                  <div>{t('session.account')}</div>
+                  <div>{t('session.model')}</div>
+                  <div>{t('session.messages')}</div>
+                  <div>{t('session.lastActive')}</div>
+                  <div>{t('common.actions')}</div>
+                </div>
+                
+                {sessions.map((session) => {
+                  const status = getSessionStatus(session)
+                  return (
+                    <div
+                      key={session.id}
+                      className="grid grid-cols-6 gap-2 text-sm py-2 border-b items-center"
+                    >
+                      <div className="truncate">{session.providerId}</div>
+                      <div className="truncate">{session.accountId}</div>
+                      <div className="truncate">{session.model || '-'}</div>
+                      <div className="flex items-center gap-2">
+                        {getStatusBadge(status)}
+                        <span>{session.messages.length}</span>
+                      </div>
+                      <div className="text-muted-foreground">
+                        {formatTime(session.lastActiveAt)}
+                      </div>
+                      <div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteSession(session.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

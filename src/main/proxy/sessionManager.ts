@@ -66,16 +66,10 @@ class SessionManagerClass {
     const config = this.getSessionConfig()
 
     if (config.mode === 'single') {
-      const newSession = this.createSession({
-        providerId,
-        accountId,
-        model,
-        sessionType,
-      })
-      console.log('[SessionManager] Created single-turn session:', newSession.id)
-      
+      // For single-turn mode, don't create session record
+      // Each request is independent, no need to track sessions
       return {
-        sessionId: newSession.id,
+        sessionId: '',  // Empty session ID indicates no session tracking
         providerSessionId: undefined,
         parentMessageId: undefined,
         messages: [],

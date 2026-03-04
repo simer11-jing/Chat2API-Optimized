@@ -46,6 +46,13 @@ interface ChatCompletionRequest {
   chatId?: string
   parentMessageId?: string
   isMultiTurn?: boolean
+  sessionContext?: {
+    sessionId: string
+    providerSessionId?: string
+    parentMessageId?: string
+    messages: any[]
+    isNew: boolean
+  }
 }
 
 function uuid(separator: boolean = true): string {
@@ -251,7 +258,7 @@ export class ZaiAdapter {
     const userId = this.extractUserIDFromToken(token)
     
     console.log('[Z.ai] chatCompletion called with request.model:', request.model)
-    console.log('[Z.ai] isMultiTurn:', request.isMultiTurn, 'chatId:', request.chatId)
+    console.log('[Z.ai] sessionContext:', request.sessionContext)
     
     const modelMapping: Record<string, string> = {
       'GLM-5': 'glm-5',
@@ -299,12 +306,17 @@ export class ZaiAdapter {
     
     const signaturePrompt = this.extractLastUserMessage(processedMessages)
     
+    // Use session context passed from forwarder
+    const sessionContext = request.sessionContext
+    const isMultiTurn = sessionContext && !sessionContext.isNew
+    
     // Reuse existing chat or create new one
-    let chatId = request.chatId || ''
+    let chatId = sessionContext?.providerSessionId || ''
+    let parentMessageId = sessionContext?.parentMessageId || null
     let messageId = ''
     
-    if (request.isMultiTurn && chatId) {
-      console.log('[Z.ai] Reusing existing chat:', chatId)
+    if (isMultiTurn && chatId) {
+      console.log('[Z.ai] Reusing existing chat:', chatId, 'parentMessageId:', parentMessageId)
       messageId = uuid()
       // For multi-turn, only send the last user message
       const lastUserIdx = processedMessages.findLastIndex((m: any) => m.role === 'user')
@@ -315,6 +327,8 @@ export class ZaiAdapter {
       const chatResult = await this.createChat(mappedModel, signaturePrompt)
       chatId = chatResult.chatId
       messageId = chatResult.messageId
+      parentMessageId = null
+      console.log('[Z.ai] Created new chat:', chatId)
     }
     
     const requestId = uuid()
@@ -351,7 +365,7 @@ export class ZaiAdapter {
       chat_id: chatId,
       id: requestId,
       current_user_message_id: messageId,
-      current_user_message_parent_id: request.parentMessageId || null,
+      current_user_message_parent_id: parentMessageId,
       background_tasks: {
         title_generation: true,
         tags_generation: true,
@@ -362,7 +376,7 @@ export class ZaiAdapter {
     console.log('[Z.ai] Model:', request.model)
     console.log('[Z.ai] ChatId:', chatId)
     console.log('[Z.ai] MessageId (current_user_message_id):', messageId)
-    console.log('[Z.ai] ParentMessageId:', request.parentMessageId || '(none)')
+    console.log('[Z.ai] ParentMessageId:', parentMessageId || '(none)')
 
     const queryParams = new URLSearchParams({
       timestamp: String(timestamp),
