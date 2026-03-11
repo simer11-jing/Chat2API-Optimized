@@ -8,6 +8,7 @@ export const IpcChannels = {
 
   CONFIG_GET: 'config:get',
   CONFIG_UPDATE: 'config:update',
+  CONFIG_CHANGED: 'config:changed',
 
   STORE_GET: 'store:get',
   STORE_SET: 'store:set',

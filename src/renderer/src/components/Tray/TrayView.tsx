@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProvidersStore } from '@/stores/providersStore'
+import type { AppConfig } from '@/types/electron'
 import iconsPng from '@/assets/icons/icons.png'
 
 interface ProviderInfo {
@@ -15,8 +16,8 @@ interface ProviderInfo {
 }
 
 export function TrayView() {
-  const { t, i18n } = useTranslation()
-  const { theme, toggleTheme, isDark } = useTheme()
+  const { t } = useTranslation()
+  const { toggleTheme, isDark } = useTheme()
   const { language } = useSettingsStore()
   const { providers, accounts, setProviders, setAccounts, setIsLoading, isLoading } = useProvidersStore()
 
@@ -29,18 +30,32 @@ export function TrayView() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
 
   useEffect(() => {
-    window.electronAPI?.proxy?.getStatus?.().then((status) => {
+    const loadProxyStatus = async () => {
+      const status = await window.electronAPI?.proxy?.getStatus?.()
+      setProxyRunning(status.isRunning)
+      
+      const config = await window.electronAPI?.config?.get?.()
+      if (config) {
+        setPort(config.proxyPort || 8080)
+        setHost(config.proxyHost || '127.0.0.1')
+      }
+    }
+    
+    loadProxyStatus()
+
+    const unsubscribeProxy = window.electronAPI?.proxy?.onStatusChanged?.((status) => {
       setProxyRunning(status.isRunning)
       if (status.port) setPort(status.port)
     })
 
-    const unsubscribe = window.electronAPI?.proxy?.onStatusChanged?.((status) => {
-      setProxyRunning(status.isRunning)
-      if (status.port) setPort(status.port)
+    const unsubscribeConfig = window.electronAPI?.config?.onConfigChanged?.((config) => {
+      setPort(config.proxyPort || 8080)
+      setHost(config.proxyHost || '127.0.0.1')
     })
 
     return () => {
-      unsubscribe?.()
+      unsubscribeProxy?.()
+      unsubscribeConfig?.()
     }
   }, [])
 
@@ -65,12 +80,17 @@ export function TrayView() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      const [providersData, accountsData] = await Promise.all([
+      const [providersData, accountsData, config] = await Promise.all([
         window.electronAPI?.providers?.getAll?.() || [],
         window.electronAPI?.accounts?.getAll?.() || [],
+        window.electronAPI?.config?.get?.(),
       ])
       setProviders(providersData)
       setAccounts(accountsData)
+      if (config) {
+        setPort(config.proxyPort || 8080)
+        setHost(config.proxyHost || '127.0.0.1')
+      }
     } catch (error) {
       console.error('Failed to load data:', error)
     } finally {

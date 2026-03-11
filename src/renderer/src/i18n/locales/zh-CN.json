@@ -439,7 +439,18 @@
     "clientDetectionDesc": "检测已注入提示词的客户端，避免重复注入",
     "skipKnownClients": "跳过已知客户端",
     "skipKnownClientsDesc": "检测到这些客户端时跳过注入",
-    "toolPromptConfigUpdated": "工具提示词配置已更新"
+    "toolPromptConfigUpdated": "工具提示词配置已更新",
+    "restartRequired": "需要重启",
+    "restartRequiredDesc": "端口或绑定地址已更改。代理服务需要重启才能使更改生效。是否立即重启？",
+    "restartNow": "立即重启",
+    "restarting": "正在重启...",
+    "proxyRestarted": "代理服务已使用新配置重启",
+    "proxyRestartFailed": "代理服务重启失败",
+    "validationFailed": "验证失败",
+    "fixFormErrors": "请修正表单中的错误",
+    "proxyConfigUpdated": "代理配置已更新",
+    "configSaveFailed": "保存配置失败",
+    "saving": "保存中..."
   },
   "apiKeys": {
     "title": "API Key 管理",

@@ -8,7 +8,15 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useProxyStore } from '@/stores/proxyStore'
 import { useToast } from '@/hooks/use-toast'
-import { Server, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Server, AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 interface ProxyConfigFormProps {
   onConfigChange?: () => void
@@ -22,7 +30,7 @@ interface FormErrors {
 
 export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
   const { t } = useTranslation()
-  const { proxyConfig, setProxyConfig, saveAppConfig, isLoading } = useProxyStore()
+  const { proxyConfig, proxyStatus, setProxyConfig, saveAppConfig, startProxy, stopProxy, isLoading } = useProxyStore()
   const { toast } = useToast()
   
   const initialConfigRef = useRef({
@@ -41,6 +49,8 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
   
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasChanges, setHasChanges] = useState(false)
+  const [showRestartDialog, setShowRestartDialog] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
 
   useEffect(() => {
     const newFormData = {
@@ -146,9 +156,23 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
       return
     }
 
+    const newPort = parseInt(formData.port, 10)
+    const newHost = formData.host
+    const portOrHostChanged = newPort !== proxyConfig.port || newHost !== proxyConfig.host
+    const isProxyRunning = proxyStatus?.isRunning
+
+    if (portOrHostChanged && isProxyRunning) {
+      setShowRestartDialog(true)
+      return
+    }
+
+    await performSave(newPort, newHost)
+  }
+
+  const performSave = async (newPort: number, newHost: string) => {
     const newConfig = {
-      port: parseInt(formData.port, 10),
-      host: formData.host,
+      port: newPort,
+      host: newHost,
       enableCors: formData.enableCors,
       corsOrigin: formData.corsOrigin,
     }
@@ -162,6 +186,12 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
 
     if (success) {
       setHasChanges(false)
+      initialConfigRef.current = {
+        port: newPort.toString(),
+        host: newHost,
+        enableCors: formData.enableCors,
+        corsOrigin: formData.corsOrigin,
+      }
       toast({
         title: t('common.success'),
         description: t('proxy.proxyConfigUpdated'),
@@ -175,6 +205,38 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
     }
   }
 
+  const handleRestartAndSave = async () => {
+    setIsRestarting(true)
+    try {
+      const newPort = parseInt(formData.port, 10)
+      const newHost = formData.host
+      
+      await performSave(newPort, newHost)
+      
+      await stopProxy()
+      
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
+      const success = await startProxy(newPort)
+      
+      if (success) {
+        toast({
+          title: t('common.success'),
+          description: t('proxy.proxyRestarted'),
+        })
+      } else {
+        toast({
+          title: t('common.error'),
+          description: t('proxy.proxyRestartFailed'),
+          variant: 'destructive',
+        })
+      }
+    } finally {
+      setIsRestarting(false)
+      setShowRestartDialog(false)
+    }
+  }
+
   const handleReset = () => {
     setFormData(initialConfigRef.current)
     setErrors({})
@@ -184,132 +246,170 @@ export function ProxyConfigForm({ onConfigChange }: ProxyConfigFormProps) {
   const isValid = !errors.port && !errors.host && !errors.corsOrigin
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Server className="h-5 w-5 text-primary" />
-            <CardTitle>{t('proxy.basicConfig')}</CardTitle>
-          </div>
-          {hasChanges && (
-            <Badge variant="secondary" className="text-xs">
-              {t('proxy.unsaved')}
-            </Badge>
-          )}
-        </div>
-        <CardDescription>{t('proxy.basicConfigDesc')}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="port" className="flex items-center gap-2">
-              {t('proxy.listeningPort')}
-              {errors.port && (
-                <span className="text-destructive text-xs flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  {errors.port}
-                </span>
-              )}
-              {!errors.port && formData.port && (
-                <CheckCircle2 className="h-3 w-3 text-green-500" />
-              )}
-            </Label>
-            <Input
-              id="port"
-              type="number"
-              placeholder="8080"
-              value={formData.port}
-              onChange={(e) => handlePortChange(e.target.value)}
-              className={errors.port ? 'border-destructive' : ''}
-            />
-            <p className="text-xs text-muted-foreground">
-              {t('proxy.portRange')}
-            </p>
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="host" className="flex items-center gap-2">
-              {t('proxy.bindAddress')}
-              {errors.host && (
-                <span className="text-destructive text-xs flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  {errors.host}
-                </span>
-              )}
-              {!errors.host && formData.host && (
-                <CheckCircle2 className="h-3 w-3 text-green-500" />
-              )}
-            </Label>
-            <Input
-              id="host"
-              placeholder="127.0.0.1"
-              value={formData.host}
-              onChange={(e) => handleHostChange(e.target.value)}
-              className={errors.host ? 'border-destructive' : ''}
-            />
-            <p className="text-xs text-muted-foreground">
-              {t('proxy.bindAddressHelp')}
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-4 pt-4 border-t">
+    <>
+      <Card>
+        <CardHeader>
           <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="cors-toggle">{t('proxy.enableCors')}</Label>
-              <p className="text-sm text-muted-foreground">
-                {t('proxy.enableCorsHelp')}
-              </p>
+            <div className="flex items-center gap-2">
+              <Server className="h-5 w-5 text-primary" />
+              <CardTitle>{t('proxy.basicConfig')}</CardTitle>
             </div>
-            <Switch
-              id="cors-toggle"
-              checked={formData.enableCors}
-              onCheckedChange={handleCorsToggle}
-            />
+            {hasChanges && (
+              <Badge variant="secondary" className="text-xs">
+                {t('proxy.unsaved')}
+              </Badge>
+            )}
           </div>
-
-          {formData.enableCors && (
+          <CardDescription>{t('proxy.basicConfigDesc')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="cors-origin" className="flex items-center gap-2">
-                {t('proxy.corsOrigin')}
-                {errors.corsOrigin && (
+              <Label htmlFor="port" className="flex items-center gap-2">
+                {t('proxy.listeningPort')}
+                {errors.port && (
                   <span className="text-destructive text-xs flex items-center gap-1">
                     <AlertCircle className="h-3 w-3" />
-                    {errors.corsOrigin}
+                    {errors.port}
                   </span>
+                )}
+                {!errors.port && formData.port && (
+                  <CheckCircle2 className="h-3 w-3 text-green-500" />
                 )}
               </Label>
               <Input
-                id="cors-origin"
-                placeholder="* or https://example.com,https://another.com"
-                value={formData.corsOrigin}
-                onChange={(e) => handleCorsOriginChange(e.target.value)}
-                className={errors.corsOrigin ? 'border-destructive' : ''}
+                id="port"
+                type="number"
+                placeholder="8080"
+                value={formData.port}
+                onChange={(e) => handlePortChange(e.target.value)}
+                className={errors.port ? 'border-destructive' : ''}
               />
               <p className="text-xs text-muted-foreground">
-                {t('proxy.corsOriginHelp')}
+                {t('proxy.portRange')}
               </p>
             </div>
-          )}
-        </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="host" className="flex items-center gap-2">
+                {t('proxy.bindAddress')}
+                {errors.host && (
+                  <span className="text-destructive text-xs flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    {errors.host}
+                  </span>
+                )}
+                {!errors.host && formData.host && (
+                  <CheckCircle2 className="h-3 w-3 text-green-500" />
+                )}
+              </Label>
+              <Input
+                id="host"
+                placeholder="127.0.0.1"
+                value={formData.host}
+                onChange={(e) => handleHostChange(e.target.value)}
+                className={errors.host ? 'border-destructive' : ''}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t('proxy.bindAddressHelp')}
+              </p>
+            </div>
+          </div>
 
-        <div className="flex justify-end space-x-2 pt-4">
-          <Button
-            variant="outline"
-            onClick={handleReset}
-            disabled={!hasChanges || isLoading}
-          >
-            {t('common.reset')}
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={!hasChanges || !isValid || isLoading}
-          >
-            {isLoading ? t('proxy.saving') : t('proxy.saveConfig')}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+          <div className="space-y-4 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="cors-toggle">{t('proxy.enableCors')}</Label>
+                <p className="text-sm text-muted-foreground">
+                  {t('proxy.enableCorsHelp')}
+                </p>
+              </div>
+              <Switch
+                id="cors-toggle"
+                checked={formData.enableCors}
+                onCheckedChange={handleCorsToggle}
+              />
+            </div>
+
+            {formData.enableCors && (
+              <div className="space-y-2">
+                <Label htmlFor="cors-origin" className="flex items-center gap-2">
+                  {t('proxy.corsOrigin')}
+                  {errors.corsOrigin && (
+                    <span className="text-destructive text-xs flex items-center gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      {errors.corsOrigin}
+                    </span>
+                  )}
+                </Label>
+                <Input
+                  id="cors-origin"
+                  placeholder="* or https://example.com,https://another.com"
+                  value={formData.corsOrigin}
+                  onChange={(e) => handleCorsOriginChange(e.target.value)}
+                  className={errors.corsOrigin ? 'border-destructive' : ''}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('proxy.corsOriginHelp')}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end space-x-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={handleReset}
+              disabled={!hasChanges || isLoading}
+            >
+              {t('common.reset')}
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={!hasChanges || !isValid || isLoading}
+            >
+              {isLoading ? t('proxy.saving') : t('proxy.saveConfig')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={showRestartDialog} onOpenChange={setShowRestartDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('proxy.restartRequired')}</DialogTitle>
+            <DialogDescription>
+              {t('proxy.restartRequiredDesc')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowRestartDialog(false)}
+              disabled={isRestarting}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button 
+              onClick={handleRestartAndSave}
+              disabled={isRestarting}
+            >
+              {isRestarting ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  {t('proxy.restarting')}
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  {t('proxy.restartNow')}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

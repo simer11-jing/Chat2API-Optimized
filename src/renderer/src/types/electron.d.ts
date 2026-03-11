@@ -213,6 +213,7 @@ interface AppAPI {
 interface ConfigAPI {
   get: () => Promise<AppConfig>
   update: (updates: Partial<AppConfig>) => Promise<boolean>
+  onConfigChanged: (callback: (config: AppConfig) => void) => () => void
 }
 
 interface PromptsAPI {
@@ -343,6 +344,12 @@ interface StatisticsAPI {
   getToday: () => Promise<DailyStatistics>
 }
 
+interface TrayAPI {
+  openDashboard: () => void
+  setHeight: (height: number) => void
+  quitApp: () => void
+}
+
 interface ElectronAPI {
   proxy: ProxyAPI
   store: StoreAPI
@@ -356,6 +363,7 @@ interface ElectronAPI {
   config: ConfigAPI
   prompts: PromptsAPI
   session: SessionAPI
+  tray: TrayAPI
   on: (channel: string, callback: (...args: unknown[]) => void) => () => void
   send: (channel: string, ...args: unknown[]) => void
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>

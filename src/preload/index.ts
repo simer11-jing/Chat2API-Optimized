@@ -386,6 +386,12 @@ const configAPI = {
   
   update: (updates: Partial<AppConfig>): Promise<boolean> => 
     ipcRenderer.invoke(IpcChannels.CONFIG_UPDATE, updates),
+  
+  onConfigChanged: (callback: (config: AppConfig) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, config: AppConfig) => callback(config)
+    ipcRenderer.on(IpcChannels.CONFIG_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IpcChannels.CONFIG_CHANGED, handler)
+  },
 }
 
 const promptsAPI = {

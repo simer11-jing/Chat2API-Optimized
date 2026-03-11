@@ -439,7 +439,18 @@
     "clientDetectionDesc": "Detect clients that have already injected prompts to avoid duplicates",
     "skipKnownClients": "Skip Known Clients",
     "skipKnownClientsDesc": "Skip injection when these clients are detected",
-    "toolPromptConfigUpdated": "Tool prompt configuration has been updated"
+    "toolPromptConfigUpdated": "Tool prompt configuration has been updated",
+    "restartRequired": "Restart Required",
+    "restartRequiredDesc": "Port or bind address has changed. The proxy service needs to restart for the changes to take effect. Restart now?",
+    "restartNow": "Restart Now",
+    "restarting": "Restarting...",
+    "proxyRestarted": "Proxy service has been restarted with new configuration",
+    "proxyRestartFailed": "Failed to restart proxy service",
+    "validationFailed": "Validation Failed",
+    "fixFormErrors": "Please fix the errors in the form",
+    "proxyConfigUpdated": "Proxy configuration has been updated",
+    "configSaveFailed": "Failed to save configuration",
+    "saving": "Saving..."
   },
   "apiKeys": {
     "title": "API Key Management",

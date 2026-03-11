@@ -157,6 +157,13 @@ export async function registerIpcHandlers(mainWindow: BrowserWindow | null): Pro
     const currentConfig = storeManager.getConfig()
     const newConfig = { ...currentConfig, ...updates }
     storeManager.setConfig(newConfig)
+    
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send(IpcChannels.CONFIG_CHANGED, newConfig)
+      }
+    })
+    
     return true
   })
 
