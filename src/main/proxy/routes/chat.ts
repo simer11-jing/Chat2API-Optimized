@@ -39,7 +39,7 @@ function getClientIP(ctx: Context): string {
 }
 
 /**
- * Extract user input from messages (last user message, truncated to 200 chars)
+ * Extract user input from messages (last user message, full content)
  */
 function extractUserInput(messages: Array<{ role: string; content?: string | any[] | null }>): string | undefined {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -55,7 +55,7 @@ function extractUserInput(messages: Array<{ role: string; content?: string | any
         }
       }
       if (content) {
-        return content.length > 200 ? content.substring(0, 200) + '...' : content
+        return content
       }
     }
   }

@@ -38,9 +38,8 @@ interface LogDetailModalProps {
   onClose: () => void
 }
 
-function JsonViewer({ data, maxHeight = 300 }: { data: string; maxHeight?: number }) {
+function JsonViewer({ data }: { data: string }) {
   const [copied, setCopied] = useState(false)
-  const [expanded, setExpanded] = useState(false)
 
   const handleCopy = useCallback(async () => {
     try {
@@ -52,64 +51,14 @@ function JsonViewer({ data, maxHeight = 300 }: { data: string; maxHeight?: numbe
     }
   }, [data])
 
-  const lines = data.split('\n')
-  const lineCount = lines.length
-  const isLong = lineCount > 20 || data.length > 2000
-
-  const renderLine = (line: string, index: number) => {
-    let className = 'text-muted-foreground'
-
-    if (line.includes(':')) {
-      const valueParts = line.split(':')
-      const value = valueParts.slice(1).join(':').trim()
-
-      if (value.startsWith('"') || value.startsWith("'")) {
-        className = 'text-green-500'
-      } else if (value === 'true' || value === 'false') {
-        className = 'text-yellow-500'
-      } else if (!isNaN(Number(value))) {
-        className = 'text-blue-500'
-      } else if (value === 'null') {
-        className = 'text-red-400'
-      }
-    }
-
-    return (
-      <div key={index} className="flex">
-        <span className="w-8 text-right pr-2 text-muted-foreground/50 select-none text-xs">
-          {index + 1}
-        </span>
-        <span className={cn('text-xs font-mono', className)}>{line}</span>
-      </div>
-    )
-  }
-
   return (
     <div className="relative">
-      <div
-        className={cn('bg-muted/50 rounded-lg p-3 overflow-auto', !expanded && isLong)}
-        style={{ maxHeight: expanded ? undefined : maxHeight }}
-      >
-        <pre className="text-xs font-mono">
-          {lines.slice(0, expanded ? undefined : 20).map(renderLine)}
-          {!expanded && isLong && (
-            <div className="text-muted-foreground text-center py-2">
-              ... {lineCount - 20} more lines
-            </div>
-          )}
+      <div className="bg-muted/50 rounded-lg p-3 overflow-x-auto">
+        <pre className="text-xs font-mono whitespace-pre-wrap break-all">
+          {data}
         </pre>
       </div>
-      <div className="absolute top-2 right-2 flex gap-1">
-        {isLong && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={() => setExpanded(!expanded)}
-          >
-            {expanded ? 'Collapse' : 'Expand'}
-          </Button>
-        )}
+      <div className="absolute top-2 right-2">
         <Button
           variant="ghost"
           size="sm"
@@ -140,9 +89,9 @@ export function LogDetailModal({ log, open, onClose }: LogDetailModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[80vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
+      <DialogContent className="max-w-3xl w-[90vw] h-[85vh] max-h-[800px] p-0 flex flex-col">
+        <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
+          <DialogTitle className="flex items-center justify-between flex-wrap gap-2">
             <span>{t('logs.detail')}</span>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" onClick={handleExport}>
@@ -155,38 +104,38 @@ export function LogDetailModal({ log, open, onClose }: LogDetailModalProps) {
             </div>
           </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="flex-1">
-          <div className="space-y-4">
+        <ScrollArea className="flex-1 px-6 pb-6 min-h-0">
+          <div className="space-y-4 pr-4">
             <div className="grid grid-cols-2 gap-4">
-              <div>
+              <div className="min-w-0">
                 <label className="text-sm text-muted-foreground">{t('logs.time')}</label>
-                <p className="font-medium">{log.timestamp}</p>
+                <p className="font-medium break-all">{log.timestamp}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-sm text-muted-foreground">{t('logs.status')}</label>
-                <p className="font-medium flex items-center gap-2">
+                <p className="font-medium flex items-center gap-2 flex-wrap">
                   <span
                     className={cn(
-                      'h-2 w-2 rounded-full',
+                      'h-2 w-2 rounded-full shrink-0',
                       log.status === 'success' ? 'bg-green-500' : 'bg-red-500'
                     )}
                   />
-                  {log.statusCode}
+                  <span className="break-all">{log.statusCode}</span>
                 </p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-sm text-muted-foreground">{t('logs.provider')}</label>
-                <p className="font-medium">{log.provider || '-'}</p>
+                <p className="font-medium break-all">{log.provider || '-'}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-sm text-muted-foreground">{t('logs.model')}</label>
-                <p className="font-medium">{log.model || '-'}</p>
+                <p className="font-medium break-all">{log.model || '-'}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-sm text-muted-foreground">{t('logs.account')}</label>
-                <p className="font-medium">{log.account || '-'}</p>
+                <p className="font-medium break-all">{log.account || '-'}</p>
               </div>
-              <div>
+              <div className="min-w-0">
                 <label className="text-sm text-muted-foreground">Duration</label>
                 <p className="font-medium">{log.duration ? `${(log.duration * 1000).toFixed(0)}ms` : '-'}</p>
               </div>
@@ -195,8 +144,10 @@ export function LogDetailModal({ log, open, onClose }: LogDetailModalProps) {
             {log.userInput && (
               <div>
                 <label className="text-sm text-muted-foreground">{t('logs.userInput')}</label>
-                <div className="mt-1 p-3 bg-muted/50 rounded-lg overflow-auto max-h-[200px]">
-                  <p className="text-sm whitespace-pre-wrap break-all">{log.userInput}</p>
+                <div className="mt-1 p-3 bg-muted/50 rounded-lg">
+                  <pre className="text-sm whitespace-pre-wrap break-all font-sans">
+                    {log.userInput}
+                  </pre>
                 </div>
               </div>
             )}
@@ -204,8 +155,10 @@ export function LogDetailModal({ log, open, onClose }: LogDetailModalProps) {
             {log.error && (
               <div>
                 <label className="text-sm text-red-500">Error</label>
-                <div className="mt-1 p-3 bg-red-500/10 rounded-lg border border-red-500/20 overflow-auto max-h-[200px]">
-                  <p className="text-sm text-red-600 whitespace-pre-wrap break-all">{log.error}</p>
+                <div className="mt-1 p-3 bg-red-500/10 rounded-lg border border-red-500/20">
+                  <pre className="text-sm text-red-600 whitespace-pre-wrap break-all font-sans">
+                    {log.error}
+                  </pre>
                 </div>
               </div>
             )}
