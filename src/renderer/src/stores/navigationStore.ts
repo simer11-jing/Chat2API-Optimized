@@ -3,8 +3,6 @@ import { create } from 'zustand'
 type NavigationBlocker = {
   id: string
   message: string
-  onConfirm: () => void
-  onCancel: () => void
 }
 
 interface NavigationState {
@@ -29,7 +27,7 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     set((state) => ({
       blockers: state.blockers.some(b => b.id === id)
         ? state.blockers.map(b => b.id === id ? { ...b, message } : b)
-        : [...state.blockers, { id, message, onConfirm: () => {}, onCancel: () => {} }]
+        : [...state.blockers, { id, message }]
     }))
   },
 
