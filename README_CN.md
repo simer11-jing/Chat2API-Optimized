@@ -26,7 +26,7 @@
   Chat2API 通过驱动各大模型的官方 Web UI，实现 0 成本接入主流 AI 大模型。支持 DeepSeek、GLM、Kimi、MiniMax、Qwen、Z.ai 等渠道，可无缝连接 openlcaw、Cline、Roo-Code 等工具，让任何 OpenAI 兼容客户端即刻可用。
 </p>
 
-!\[Product Preview]\(docs/screenshots/preview\.png)
+![Product Preview](docs/screenshots/preview.png)
 
 ## ✨ 功能特性
 
