@@ -26,7 +26,7 @@
   Chat2API enables zero-cost access to leading AI models by leveraging official web UIs. It supports providers such as DeepSeek, GLM, Kimi, MiniMax, Qwen, and Z.ai, and seamlessly integrates with tools like openlcaw, Cline, and Roo-Code — making any OpenAI-compatible client work out of the box.
 </p>
 
-![Product Preview](docs/screenshots/preview.png)
+!\[Product Preview]\(docs/screenshots/preview\.png null)
 
 ## ✨ Features
 
@@ -165,17 +165,17 @@ For security, you can enable API Key authentication:
 
 ## 📸 Screenshots
 
-| Dashboard                                           | Providers                                           |
-| --------------------------------------------------- | --------------------------------------------------- |
-| !\[Dashboard]\(docs/screenshots/dashboard.png null) | !\[Providers]\(docs/screenshots/providers.png null) |
+| Dashboard                                      | Providers                                      |
+| ---------------------------------------------- | ---------------------------------------------- |
+| !\[Dashboard]\(docs/screenshots/dashboard.png) | !\[Providers]\(docs/screenshots/providers.png) |
 
-| Proxy Settings                              | API Keys                                          |
-| ------------------------------------------- | ------------------------------------------------- |
-| !\[Proxy]\(docs/screenshots/proxy.png null) | !\[API Keys]\(docs/screenshots/api-keys.png null) |
+| Proxy Settings                         | API Keys                                     |
+| -------------------------------------- | -------------------------------------------- |
+| !\[Proxy]\(docs/screenshots/proxy.png) | !\[API Keys]\(docs/screenshots/api-keys.png) |
 
-| Models                                        | Session                                         |
-| --------------------------------------------- | ----------------------------------------------- |
-| !\[Models]\(docs/screenshots/models.png null) | !\[Session]\(docs/screenshots/Session.png null) |
+| Models                                   | Session                                    |
+| ---------------------------------------- | ------------------------------------------ |
+| !\[Models]\(docs/screenshots/models.png) | !\[Session]\(docs/screenshots/Session.png) |
 
 ## ⚙️ Settings
 
