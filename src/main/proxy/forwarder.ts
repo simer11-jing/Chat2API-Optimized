@@ -42,6 +42,18 @@ function shouldDeleteSession(): boolean {
   return sessionManager.shouldDeleteAfterChat()
 }
 
+type ProviderForwarder = {
+  name: string
+  matches: (provider: Provider) => boolean
+  forward: (
+    request: ChatCompletionRequest,
+    account: Account,
+    provider: Provider,
+    actualModel: string,
+    startTime: number
+  ) => Promise<ForwardResult>
+}
+
 /**
  * Request Forwarder
  */
@@ -51,6 +63,63 @@ export class RequestForwarder {
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
   })
+
+  private readonly providerForwarders: ProviderForwarder[] = [
+    {
+      name: 'deepseek',
+      matches: DeepSeekAdapter.isDeepSeekProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardDeepSeek(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'glm',
+      matches: GLMAdapter.isGLMProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardGLM(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'kimi',
+      matches: KimiAdapter.isKimiProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardKimi(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'qwen',
+      matches: QwenAdapter.isQwenProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardQwen(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'qwen-ai',
+      matches: QwenAiAdapter.isQwenAiProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardQwenAi(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'zai',
+      matches: ZaiAdapter.isZaiProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardZai(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'minimax',
+      matches: MiniMaxAdapter.isMiniMaxProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardMiniMax(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'mimo',
+      matches: MimoAdapter.isMimoProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardMimo(request, account, provider, actualModel, startTime),
+    },
+    {
+      name: 'perplexity',
+      matches: PerplexityAdapter.isPerplexityProvider,
+      forward: (request, account, provider, actualModel, startTime) =>
+        this.forwardPerplexity(request, account, provider, actualModel, startTime),
+    },
+  ]
 
   /**
    * Transform request for prompt-based tool calling
@@ -452,49 +521,9 @@ CRITICAL RULES:
   ): Promise<ForwardResult> {
     const startTime = Date.now()
 
-    // Check if it is a DeepSeek provider, use dedicated adapter
-    if (DeepSeekAdapter.isDeepSeekProvider(provider)) {
-      return this.forwardDeepSeek(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a GLM provider, use dedicated adapter
-    if (GLMAdapter.isGLMProvider(provider)) {
-      return this.forwardGLM(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a Kimi provider, use dedicated adapter
-    if (KimiAdapter.isKimiProvider(provider)) {
-      return this.forwardKimi(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a Qwen provider, use dedicated adapter
-    if (QwenAdapter.isQwenProvider(provider)) {
-      return this.forwardQwen(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a Qwen AI (International) provider, use dedicated adapter
-    if (QwenAiAdapter.isQwenAiProvider(provider)) {
-      return this.forwardQwenAi(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a Z.ai provider, use dedicated adapter
-    if (ZaiAdapter.isZaiProvider(provider)) {
-      return this.forwardZai(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a MiniMax provider, use dedicated adapter
-    if (MiniMaxAdapter.isMiniMaxProvider(provider)) {
-      return this.forwardMiniMax(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a Mimo provider, use dedicated adapter
-    if (MimoAdapter.isMimoProvider(provider)) {
-      return this.forwardMimo(request, account, provider, actualModel, startTime)
-    }
-
-    // Check if it is a Perplexity provider, use dedicated adapter
-    if (PerplexityAdapter.isPerplexityProvider(provider)) {
-      return this.forwardPerplexity(request, account, provider, actualModel, startTime)
+    const dedicatedForwarder = this.providerForwarders.find(forwarder => forwarder.matches(provider))
+    if (dedicatedForwarder) {
+      return dedicatedForwarder.forward(request, account, provider, actualModel, startTime)
     }
 
     try {
