@@ -38,8 +38,13 @@ export interface ToolPromptConfig {
 
 export const DEFAULT_TOOL_PROMPT_CONFIG: ToolPromptConfig = {
   mode: 'smart',
-  smartThreshold: 50,
-  keywords: ['search', 'find', 'get', 'call', 'use', 'tool', 'query', 'fetch', 'read', 'write', 'list', 'delete', 'update', 'create']
+  smartThreshold: 100,
+  keywords: [
+    'search for', 'find file', 'read file', 'write file', 'list directory',
+    'execute command', 'run command', 'call api', 'fetch data', 'query database',
+    'create file', 'delete file', 'update file', 'modify file',
+    'tool', 'function', 'api call',
+  ]
 }
 
 export function shouldInjectToolPrompt(
@@ -66,42 +71,46 @@ export function shouldInjectToolPrompt(
 function isComplexQuery(messages: ChatMessage[], config: ToolPromptConfig): boolean {
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
   if (!lastUserMsg) return false
-  
+
   const content = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : ''
-  
+
+  // Increased threshold - need more content
   if (content.length > config.smartThreshold) {
     return true
   }
-  
+
   const lowerContent = content.toLowerCase()
-  for (const keyword of config.keywords) {
-    if (lowerContent.includes(keyword.toLowerCase())) {
-      return true
-    }
-  }
-  
-  if (content.includes('?') || content.includes('？')) {
-    return true
-  }
-  
-  if (content.includes('```') || content.includes('code')) {
-    return true
-  }
-  
-  const actionPatterns = [
+
+  // Require explicit tool-related patterns
+  const toolActionPatterns = [
+    /\b(use|call|invoke)\s+(the\s+)?(tool|function|api)\b/i,
+    /\b(search|find|read|write|list|delete|create|update|modify)\s+(file|directory|folder)\b/i,
+    /\b(execute|run)\s+(command|script)\b/i,
+    /\b(fetch|get|query)\s+(data|information|api)\b/i,
     /help me (\w+)/i,
     /can you (\w+)/i,
-    /please (\w+)/i,
-    /i need to (\w+)/i,
-    /i want to (\w+)/i,
   ]
-  
-  for (const pattern of actionPatterns) {
+
+  for (const pattern of toolActionPatterns) {
     if (pattern.test(content)) {
       return true
     }
   }
-  
+
+  // Check keywords with context - must have action word nearby
+  for (const keyword of config.keywords) {
+    const keywordIndex = lowerContent.indexOf(keyword.toLowerCase())
+    if (keywordIndex !== -1) {
+      const contextStart = Math.max(0, keywordIndex - 30)
+      const contextEnd = Math.min(content.length, keywordIndex + keyword.length + 30)
+      const context = lowerContent.substring(contextStart, contextEnd)
+
+      if (/\b(use|call|need|want|help|can|please|try)\b/.test(context)) {
+        return true
+      }
+    }
+  }
+
   return false
 }
 

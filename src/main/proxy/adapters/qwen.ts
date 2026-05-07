@@ -13,6 +13,7 @@ import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected, shouldInjectToolPrompt } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
+import { BaseAdapterHelper } from './baseAdapter'
 import { 
   createToolCallState, 
   processStreamContent, 
@@ -40,20 +41,16 @@ const MODEL_MAP: Record<string, string> = {
   'Qwen3-Coder': 'qwen3-coder-plus',
 }
 
-const DEFAULT_HEADERS = {
+const BASE_HEADERS = {
   Accept: 'application/json, text/event-stream, text/plain, */*',
   'Accept-Language': 'zh-CN,zh;q=0.9',
   'Cache-Control': 'no-cache',
   Origin: 'https://www.qianwen.com',
   Pragma: 'no-cache',
-  'Sec-Ch-Ua': '"Chromium";v="145", "Not(A:Brand";v="24", "Google Chrome";v="145"',
-  'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-site',
   Referer: 'https://www.qianwen.com/',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
 }
 
 interface QwenMessage {
@@ -107,6 +104,7 @@ function extractTextContent(content: string | any[]): string {
 export class QwenAdapter {
   private provider: Provider
   private account: Account
+  private helper: BaseAdapterHelper
   private axiosInstance = axios.create({
     timeout: 120000,
     maxBodyLength: Infinity,
@@ -116,6 +114,7 @@ export class QwenAdapter {
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
+    this.helper = new BaseAdapterHelper(account, provider, 'qwen')
   }
 
   private getTicket(): string {
@@ -242,9 +241,12 @@ export class QwenAdapter {
 
     console.log('[Qwen] Sending request to /api/v2/chat...')
 
+    // Wait for rate limit before making request
+    await this.helper.waitForRateLimit()
+
     const response = await this.axiosInstance.post(url, requestBody, {
       headers: {
-        ...DEFAULT_HEADERS,
+        ...this.helper.generateDynamicHeaders(BASE_HEADERS),
         'Content-Type': 'application/json',
         Cookie: `tongyi_sso_ticket=${ticket}`,
       },
@@ -255,6 +257,12 @@ export class QwenAdapter {
 
     console.log('[Qwen] Response status:', response.status)
     console.log('[Qwen] Response headers:', JSON.stringify(response.headers, null, 2))
+
+    // Store cookies from response headers if available
+    const setCookieHeader = response.headers?.['set-cookie']
+    if (setCookieHeader) {
+      this.helper.storeCookies(setCookieHeader)
+    }
 
     return { response, sessionId, reqId }
   }
@@ -272,7 +280,7 @@ export class QwenAdapter {
         {
           headers: {
             Cookie: `tongyi_sso_ticket=${ticket}`,
-            ...DEFAULT_HEADERS,
+            ...this.helper.generateDynamicHeaders(BASE_HEADERS),
             'X-Platform': 'pc_tongyi',
             'X-DeviceId': '5b68c267-cd8e-fd0e-148a-18345bc9a104',
           },

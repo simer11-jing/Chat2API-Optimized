@@ -16,23 +16,20 @@ import {
   ToolCallState 
 } from '../utils/streamToolHandler'
 import { createKimiChatPayload, encodeKimiGrpcFrame } from './providerModelOptions'
+import { BaseAdapterHelper } from './baseAdapter'
 
 const KIMI_API_BASE = 'https://www.kimi.com'
 
-const FAKE_HEADERS: Record<string, string> = {
+const BASE_HEADERS: Record<string, string> = {
   Accept: '*/*',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
   'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
   'Cache-Control': 'no-cache',
   Pragma: 'no-cache',
   Origin: KIMI_API_BASE,
-  'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-  'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
   Priority: 'u=1, i',
 }
 
@@ -114,11 +111,13 @@ export class KimiAdapter {
   private provider: Provider
   private account: Account
   private token: string
+  private helper: BaseAdapterHelper
 
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
     this.token = account.credentials.token || account.credentials.refreshToken || ''
+    this.helper = new BaseAdapterHelper(account, provider, 'kimi')
   }
 
   private async acquireToken(): Promise<{ accessToken: string; userId: string }> {
@@ -329,6 +328,9 @@ export class KimiAdapter {
 
     console.log('[Kimi] Request body length:', frameBuffer.length, 'JSON length:', frameBuffer.length - 5)
 
+    // Wait for rate limit before making request
+    await this.helper.waitForRateLimit()
+
     const response = await axios.post(
       `${KIMI_API_BASE}/apiv2/kimi.gateway.chat.v1.ChatService/Chat`,
       frameBuffer,
@@ -336,7 +338,7 @@ export class KimiAdapter {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/connect+json',
-          ...FAKE_HEADERS,
+          ...this.helper.generateDynamicHeaders(BASE_HEADERS),
         },
         timeout: 120000,
         validateStatus: () => true,
@@ -345,6 +347,12 @@ export class KimiAdapter {
     )
 
     console.log('[Kimi] Completion response status:', response.status)
+
+    // Store cookies from response headers if available
+    const setCookieHeader = response.headers?.['set-cookie']
+    if (setCookieHeader) {
+      this.helper.storeCookies(setCookieHeader)
+    }
 
     if (response.status === 401) {
       accessTokenMap.delete(this.token)
@@ -369,7 +377,7 @@ export class KimiAdapter {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
-            ...FAKE_HEADERS,
+            ...this.helper.generateDynamicHeaders(BASE_HEADERS),
           },
           timeout: 15000,
           validateStatus: () => true,

@@ -14,13 +14,14 @@ import mime from 'mime-types'
 import path from 'path'
 import { toolsToSystemPrompt, TOOL_WRAP_HINT, hasToolPromptInjected } from '../utils/tools'
 import { parseToolCallsFromText } from '../utils/toolParser'
-import { 
-  createToolCallState, 
-  processStreamContent, 
+import {
+  createToolCallState,
+  processStreamContent,
   flushToolCallBuffer,
   createBaseChunk,
-  ToolCallState 
+  ToolCallState
 } from '../utils/streamToolHandler'
+import { BaseAdapterHelper } from './baseAdapter'
 
 const GLM_API_BASE = 'https://chatglm.cn/chatglm'
 const DEFAULT_ASSISTANT_ID = '65940acff94777010aa6b796'
@@ -28,7 +29,8 @@ const SIGN_SECRET = '8a1317a7468aa3ad86e997d08f3f31cb'
 const ACCESS_TOKEN_EXPIRES = 3600
 const FILE_MAX_SIZE = 100 * 1024 * 1024 // 100MB
 
-const FAKE_HEADERS = {
+// Base headers without dynamic/fingerprint-specific values (anti-detection will add those)
+const BASE_HEADERS = {
   Accept: 'text/event-stream',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
@@ -38,19 +40,14 @@ const FAKE_HEADERS = {
   Origin: 'https://chatglm.cn',
   Pragma: 'no-cache',
   Priority: 'u=1, i',
-  'Sec-Ch-Ua': '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-  'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
   'X-App-Fr': 'browser_extension',
   'X-App-Platform': 'pc',
-  'X-App-Version': '0.0.1',
   'X-Device-Brand': '',
   'X-Device-Model': '',
   'X-Lang': 'zh',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
 }
 
 interface TokenInfo {
@@ -109,10 +106,12 @@ function generateSign(): { timestamp: string; nonce: string; sign: string } {
 export class GLMAdapter {
   private provider: Provider
   private account: Account
+  private helper: BaseAdapterHelper
 
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
+    this.helper = new BaseAdapterHelper(account, provider, 'glm')
   }
 
   private getRefreshToken(): string {
@@ -135,8 +134,8 @@ export class GLMAdapter {
       {
         headers: {
           Authorization: `Bearer ${refreshToken}`,
-          ...FAKE_HEADERS,
-          'X-Device-Id': uuid(),
+          ...this.helper.generateDynamicHeaders(BASE_HEADERS),
+          'X-Device-Id': this.helper.getDeviceId(),
           'X-Nonce': sign.nonce,
           'X-Request-Id': uuid(),
           'X-Sign': sign.sign,
@@ -239,7 +238,7 @@ export class GLMAdapter {
         headers: {
           Authorization: `Bearer ${token}`,
           Referer: 'https://chatglm.cn/',
-          ...FAKE_HEADERS,
+          ...this.helper.generateDynamicHeaders(BASE_HEADERS),
           ...formData.getHeaders(),
         },
         maxBodyLength: FILE_MAX_SIZE,
@@ -520,7 +519,11 @@ GLM STRICT RULES:
     }
 
     console.log('[GLM] Sending chat request...')
-    
+
+    // Anti-detection: rate limit and jitter
+    await this.helper.waitForRateLimit()
+    await this.helper.addJitter(500, 1500)
+
     const response = await axios.post(
       `${GLM_API_BASE}/backend-api/assistant/stream`,
       {
@@ -547,8 +550,8 @@ GLM STRICT RULES:
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          ...FAKE_HEADERS,
-          'X-Device-Id': uuid(),
+          ...this.helper.generateDynamicHeaders(BASE_HEADERS),
+          'X-Device-Id': this.helper.getDeviceId(),
           'X-Request-Id': uuid(),
           'X-Sign': sign.sign,
           'X-Timestamp': sign.timestamp,
@@ -559,6 +562,12 @@ GLM STRICT RULES:
         responseType: 'stream',
       }
     )
+
+    // Store cookies from response headers
+    const setCookie = response.headers['set-cookie']
+    if (setCookie) {
+      this.helper.storeCookies(setCookie)
+    }
 
     return { response, conversationId: '' }
   }
@@ -577,12 +586,12 @@ GLM STRICT RULES:
           headers: {
             Authorization: `Bearer ${token}`,
             Referer: 'https://chatglm.cn/main/alltoolsdetail',
-            'X-Device-Id': uuid(),
+            ...this.helper.generateDynamicHeaders(BASE_HEADERS),
+            'X-Device-Id': this.helper.getDeviceId(),
             'X-Request-Id': uuid(),
             'X-Sign': sign.sign,
             'X-Timestamp': sign.timestamp,
             'X-Nonce': sign.nonce,
-            ...FAKE_HEADERS,
           },
           timeout: 15000,
           validateStatus: () => true,
@@ -614,12 +623,12 @@ GLM STRICT RULES:
             headers: {
               Authorization: `Bearer ${token}`,
               Referer: 'https://chatglm.cn/main/alltoolsdetail',
-              'X-Device-Id': uuid(),
+              ...this.helper.generateDynamicHeaders(BASE_HEADERS),
+              'X-Device-Id': this.helper.getDeviceId(),
               'X-Request-Id': uuid(),
               'X-Sign': sign.sign,
               'X-Timestamp': sign.timestamp,
               'X-Nonce': sign.nonce,
-              ...FAKE_HEADERS,
             },
             timeout: 30000,
             validateStatus: () => true,
@@ -663,12 +672,12 @@ GLM STRICT RULES:
           headers: {
             Authorization: `Bearer ${token}`,
             Referer: 'https://chatglm.cn/main/alltoolsdetail',
-            'X-Device-Id': uuid(),
+            ...this.helper.generateDynamicHeaders(BASE_HEADERS),
+            'X-Device-Id': this.helper.getDeviceId(),
             'X-Request-Id': uuid(),
             'X-Sign': sign.sign,
             'X-Timestamp': sign.timestamp,
             'X-Nonce': sign.nonce,
-            ...FAKE_HEADERS,
           },
           timeout: 60000,
           validateStatus: () => true,

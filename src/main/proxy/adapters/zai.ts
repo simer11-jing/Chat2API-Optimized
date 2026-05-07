@@ -11,32 +11,26 @@ import FormData from 'form-data'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
 import { parseToolCallsFromText } from '../utils/toolParser'
-import { 
-  createToolCallState, 
-  processStreamContent, 
+import {
+  createToolCallState,
+  processStreamContent,
   flushToolCallBuffer,
   createBaseChunk,
-  ToolCallState 
+  ToolCallState
 } from '../utils/streamToolHandler'
+import { BaseAdapterHelper } from './baseAdapter'
 
 const ZAI_API_BASE = 'https://chat.z.ai'
-const X_FE_VERSION = 'prod-fe-1.0.241'
 
-const FAKE_HEADERS = {
+const BASE_HEADERS = {
   Accept: '*/*',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
-  'Accept-Language': 'zh-CN,zh;q=0.9',
   'Cache-Control': 'no-cache',
   Origin: ZAI_API_BASE,
   Pragma: 'no-cache',
-  'Sec-Ch-Ua': '"Chromium";v="144", "Not(A:Brand";v="8", "Google Chrome";v="144"',
-  'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"Windows"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-  'X-FE-Version': X_FE_VERSION,
 }
 
 const SEARCH_CITATION_PATTERN = '【turn\\d+search\\d+】'
@@ -110,10 +104,12 @@ export class ZaiAdapter {
   private provider: Provider
   private account: Account
   private token: string | null = null
+  private helper: BaseAdapterHelper
 
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
+    this.helper = new BaseAdapterHelper(account, provider, 'zai')
   }
 
   private getToken(): string {
@@ -250,11 +246,8 @@ export class ZaiAdapter {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
-          'X-FE-Version': X_FE_VERSION,
-          'Cookie': `token=${token}`,
-          Origin: ZAI_API_BASE,
+          ...this.helper.generateDynamicHeaders(BASE_HEADERS),
           Referer: `${ZAI_API_BASE}/`,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
         },
         timeout: 15000,
         validateStatus: () => true,
@@ -273,13 +266,13 @@ export class ZaiAdapter {
   async deleteChat(chatId: string): Promise<boolean> {
     try {
       const token = await this.ensureToken()
-      
+
       const response = await axios.delete(
         `${ZAI_API_BASE}/api/v1/chats/${chatId}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            ...FAKE_HEADERS,
+            ...this.helper.generateDynamicHeaders(BASE_HEADERS),
             Referer: `${ZAI_API_BASE}/`,
           },
           timeout: 15000,
@@ -306,7 +299,7 @@ export class ZaiAdapter {
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            ...FAKE_HEADERS,
+            ...this.helper.generateDynamicHeaders(BASE_HEADERS),
             Referer: `${ZAI_API_BASE}/`,
           },
           timeout: 30000,
@@ -332,7 +325,12 @@ export class ZaiAdapter {
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; chatId: string; requestId: string }> {
     const token = await this.ensureToken()
     const userId = this.extractUserIDFromToken(token)
-    
+    const fingerprint = this.helper.getDeviceFingerprint()
+
+    // Wait for rate limit and add jitter
+    await this.helper.waitForRateLimit()
+    await this.helper.addJitter(500, 1500)
+
     console.log('[Z.ai] chatCompletion called with request.model:', request.model)
     
     // Z.ai API requires specific model name casing:
@@ -476,19 +474,18 @@ export class ZaiAdapter {
       version: '0.0.1',
       platform: 'web',
       token,
-      user_agent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-      language: 'zh-CN',
-      languages: 'zh-CN,zh',
-      timezone: 'Asia/Shanghai',
+      user_agent: fingerprint.userAgentBase,
+      language: fingerprint.language,
+      timezone: fingerprint.timezone,
       cookie_enabled: 'true',
-      screen_width: '1512',
-      screen_height: '982',
-      screen_resolution: '1512x982',
-      viewport_height: '945',
-      viewport_width: '923',
-      viewport_size: '923x945',
-      color_depth: '30',
-      pixel_ratio: '2',
+      screen_width: String(fingerprint.screenResolution.width),
+      screen_height: String(fingerprint.screenResolution.height),
+      screen_resolution: `${fingerprint.screenResolution.width}x${fingerprint.screenResolution.height}`,
+      viewport_height: String(fingerprint.viewportSize.height),
+      viewport_width: String(fingerprint.viewportSize.width),
+      viewport_size: `${fingerprint.viewportSize.width}x${fingerprint.viewportSize.height}`,
+      color_depth: String(fingerprint.colorDepth),
+      pixel_ratio: String(fingerprint.pixelRatio),
       current_url: `${ZAI_API_BASE}/c/${chatId}`,
       pathname: `/c/${chatId}`,
       search: '',
@@ -498,17 +495,18 @@ export class ZaiAdapter {
       protocol: 'https:',
       referrer: '',
       title: 'Z.ai - Free AI Chatbot & Agent powered by GLM-5 & GLM-4.7',
-      timezone_offset: '-480',
+      timezone_offset: fingerprint.timezone === 'Asia/Shanghai' ? '-480' : fingerprint.timezone === 'Asia/Hong_Kong' ? '-480' : '0',
       local_time: new Date().toISOString(),
       utc_time: new Date().toUTCString(),
       is_mobile: 'false',
       is_touch: 'false',
       max_touch_points: '0',
       browser_name: 'Chrome',
-      os_name: 'Mac OS',
+      os_name: fingerprint.platform === 'Windows' ? 'Windows' : fingerprint.platform === 'macOS' ? 'Mac OS' : 'Linux',
       signature_timestamp: String(timestamp),
     })
 
+    const dynamicHeaders = this.helper.generateDynamicHeaders(BASE_HEADERS)
     const response = await axios.post(
       `${ZAI_API_BASE}/api/v2/chat/completions?${queryParams.toString()}`,
       requestBody,
@@ -516,21 +514,12 @@ export class ZaiAdapter {
         headers: {
           'Accept': '*/*',
           'Accept-Encoding': 'gzip, deflate, br, zstd',
-          'Accept-Language': 'zh-CN',
+          'Accept-Language': fingerprint.language.split(',')[0],
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
           'X-Signature': signature,
-          'X-FE-Version': X_FE_VERSION,
-          'Cookie': `token=${token}`,
-          Origin: ZAI_API_BASE,
+          ...dynamicHeaders,
           Referer: `${ZAI_API_BASE}/c/${chatId}`,
-          'Sec-Fetch-Dest': 'empty',
-          'Sec-Fetch-Mode': 'cors',
-          'Sec-Fetch-Site': 'same-origin',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
-          'sec-ch-ua': '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"macOS"',
           Priority: 'u=1, i',
         },
         responseType: 'stream',

@@ -1,5 +1,6 @@
 import { ToolCall } from '../../types'
 import { ToolCallFormat } from '../../constants/signatures'
+import { parseJsonWithRepair, extractJsonFromMixedContent } from '../enhancedJsonParser'
 
 /**
  * 工具调用解析结果
@@ -185,7 +186,7 @@ export function parseToolCallsStream(
 
       return { chunks: result, shouldFlush: true }
     } else {
-      if (state.contentBuffer.length > 500000) {
+      if (state.contentBuffer.length > 50000) {
         state.isBufferingToolCall = false
         if (!state.hasEmittedToolCall) {
           result.push({
@@ -567,108 +568,27 @@ export function extractBalancedJson(str: string): string | null {
 
 /**
  * 尝试多种策略解析 JSON
+ * Now uses enhancedJsonParser for better repair capabilities
  */
 export function tryParseJSON(str: string): any | null {
   if (!str) return null
 
-  // 直接解析
-  try {
-    return JSON.parse(str)
-  } catch {
-    // Continue to cleanup attempts
-  }
-
-  // 修复字符串内未转义的换行符和制表符
-  try {
-    let inString = false
-    let isEscaped = false
-    let fixedStr = ''
-
-    for (let i = 0; i < str.length; i++) {
-      const char = str[i]
-
-      if (char === '\\' && !isEscaped) {
-        isEscaped = true
-        fixedStr += char
-      } else if (char === '"' && !isEscaped) {
-        inString = !inString
-        fixedStr += char
-      } else if (inString && (char === '\n' || char === '\r' || char === '\t')) {
-        if (char === '\n') fixedStr += '\\n'
-        else if (char === '\r') fixedStr += '\\r'
-        else if (char === '\t') fixedStr += '\\t'
-      } else {
-        isEscaped = false
-        fixedStr += char
-      }
+  const result = parseJsonWithRepair(str)
+  if (result.success) {
+    if (result.repaired) {
+      console.log(`[ToolParser] JSON repaired using: ${result.repairMethod}`)
     }
-
-    return JSON.parse(fixedStr)
-  } catch {
-    // Continue to next attempt
+    return result.data
   }
 
-  // 移除 JSON 标记之间的所有换行符和额外空白
-  try {
-    let inString = false
-    let isEscaped = false
-    let compactStr = ''
-
-    for (let i = 0; i < str.length; i++) {
-      const char = str[i]
-
-      if (char === '\\' && !isEscaped) {
-        isEscaped = true
-        compactStr += char
-      } else if (char === '"' && !isEscaped) {
-        inString = !inString
-        compactStr += char
-      } else if (!inString && (char === '\n' || char === '\r' || char === '\t')) {
-        continue
-      } else {
-        isEscaped = false
-        compactStr += char
-      }
+  // Fallback: try extracting JSON from mixed content
+  const extracted = extractJsonFromMixedContent(str)
+  if (extracted && extracted !== str) {
+    const extractedResult = parseJsonWithRepair(extracted)
+    if (extractedResult.success) {
+      console.log(`[ToolParser] JSON extracted and repaired using: ${extractedResult.repairMethod}`)
+      return extractedResult.data
     }
-
-    return JSON.parse(compactStr)
-  } catch {
-    // Continue to next attempt
-  }
-
-  // 修复键周围缺少引号的问题
-  try {
-    const fixedStr = str.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
-    let inString = false
-    let isEscaped = false
-    let compactStr = ''
-
-    for (let i = 0; i < fixedStr.length; i++) {
-      const char = fixedStr[i]
-      if (char === '\\' && !isEscaped) {
-        isEscaped = true
-        compactStr += char
-      } else if (char === '"' && !isEscaped) {
-        inString = !inString
-        compactStr += char
-      } else if (!inString && (char === '\n' || char === '\r')) {
-        continue
-      } else {
-        isEscaped = false
-        compactStr += char
-      }
-    }
-    return JSON.parse(compactStr)
-  } catch {
-    // Continue to next attempt
-  }
-
-  // 尝试修复单引号 (Python dict 风格)
-  try {
-    const doubleQuotedStr = str.replace(/'/g, '"')
-    return JSON.parse(doubleQuotedStr)
-  } catch {
-    // All attempts failed
   }
 
   return null

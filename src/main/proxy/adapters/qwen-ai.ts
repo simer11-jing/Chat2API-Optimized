@@ -9,26 +9,18 @@ import { PassThrough } from 'stream'
 import { createParser } from 'eventsource-parser'
 import { Account, Provider } from '../../store/types'
 import { hasToolUse, parseToolUse, ToolCall } from '../promptToolUse'
+import { BaseAdapterHelper } from './baseAdapter'
 
 const QWEN_AI_BASE = 'https://chat.qwen.ai'
 
-const DEFAULT_HEADERS = {
+const BASE_HEADERS = {
   Accept: 'application/json',
   'Accept-Language': 'zh-CN,zh;q=0.9',
   'Content-Type': 'application/json',
   source: 'web',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-  'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
-  'sec-ch-ua-mobile': '?0',
-  'sec-ch-ua-platform': '"macOS"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'bx-v': '2.5.36',
-  'bx-umidtoken': 'T2gAr9z8byN8sNOmfQ3X9j61MNTNmSqDO5L1rs2jMcQCVhOKgZICcBN-UdTuJGig-NM=',
-  'bx-ua': '231!lWD36kmUe5E+joKDK5gBZ48FEl2ZWfPwIPF92lBLek2KxVW/XJ2EwruCiDOX5Px4EXNhmh6EfS9eDwQGRwijIK64A4nPqeLysJcDjUACje/H3J4ZgGZpicG6K8AkiGGaEKC830+QSiSUsLRlL/EyhXTmLcJc/5iDkMuOpUhNz0e0Q/nTqjVJ3ko00Q/oyE+jauHhUHfb1GxGHkE+++3+qCS4+ItkaA6tiItCo+romzElfLFD6RIj7oHt9vffs98nLwpHnaqKjufnLFMejSlAUGiQvTofIiGhIvftAMcoFV4mrUHsqyQ/ncQihmJHkbxXjvM57FCb6b9dEIRZl7jgj0+QLNLRs0NZ4azdZ6rzbGTSO8KA5I3Aq/3gBr87X16Mj0oJtaPKmFGaP2zghfOVhxQht8YjRd50lJa+Ue4PAuPSdu2O69DKLH8VOhrsB+psaBIRxnRi5POUQ6w8s8qlb9vxvExjHNOAKWXV1by1Nz+6FPWdyTeAgcmonjCcV0dCtPj/KyeVDkeSrDkKZjnDzHEqeCdfmJ65kve+Vy3YS0vagzyHfVEnzN0ULUZtkGfJXFNm6+bIa55wmGBhUeXbHL0EdlQXMu1YXxmcwBgTaq7tlQcfv7AefanbfjGE8R1IFnNyg2/jXLbnLg5Z6l1oKqgnxZQg0DE9BJuw6s0XjGwTdSxybWxp+WFD/RsXt76uwvCBk7z+YmSFLtFj2UlTsoq+vl0DTmsVItDKf9SZ94NcuJ7mxJYI02S/2kQBfbbHG0d4hXevDrEC0cb86EvzN2ud+v6bAunNRGNFz/RH0KLusoBVeo+puCFKeeIJWEo0t1UicX5YxJwMAoV7+g0gK93y4W9sMQtso8/wY5wsBzis9dwfLvIwXpaAM1g0MZp/YIRq8T/Qc+U/8x99tam4er0IWizvrkjqhIzCWBKpJ4Y4gj3bOmiS3VCMEaoVfKCwUWENwYKuP3H5VI0n+O2vVVRrekUrwvkm6URRhVhN4eEFTCjB9nSQu++qKyDH8HPpkS3YfwF8/OQtrZo7hQXxvNmP2HcH/K7zcweD00BaoOLiYUtXRItGYbl06sVSbm04soRf1Jqpyo3XiRqBWD9rmJfr4w8NOEGVGUCKXLDLsXy+8JC4Iqf0FsIjWxjMVdraTUtCbwXRbYUownQVm6bt7LYD1SNPoWNPqUJgsLMwP33ugrb1UbHCs24roOch6Go5QHIPA8E15SZE9pkr1SkmqrNs/+KRomFJ9HyFnWUYhZIV9MRLqlOAt6XBBTash3WJnCjhx/PZGhXVvdn2jX4+0Pm55LsiNugA8vaAUJQBxD/8a1u/RvTgbj35+b7I7m8tG0hMhClNZF+tpsOmZZhUGuXH9uVbkJMlMuAmMVCHwn3O31GlLeXXzzep2WS3xN2U+p5J0I7GySnuZUkuGs1ZTVqGUvR2g4q+7ljU55Ak78yPZiQXeUeqS74azszvZvCqWxXn2eePj+gcpliOjrYKpglUP19rQrMt8PqLt8L0ghIqVCmMwl3Hgr/VUcqDpXdpPTR=',
-  Timezone: 'Mon Feb 23 2026 22:06:02 GMT+0800',
-  Version: '0.2.7',
   Origin: 'https://chat.qwen.ai',
 }
 
@@ -74,6 +66,7 @@ function timestamp(): number {
 export class QwenAiAdapter {
   private provider: Provider
   private account: Account
+  private helper: BaseAdapterHelper
   private axiosInstance = axios.create({
     timeout: 120000,
     maxBodyLength: Infinity,
@@ -83,6 +76,7 @@ export class QwenAiAdapter {
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
+    this.helper = new BaseAdapterHelper(account, provider, 'qwen-ai')
   }
 
   private getToken(): string {
@@ -97,7 +91,7 @@ export class QwenAiAdapter {
 
   private getHeaders(chatId?: string): Record<string, string> {
     const headers: Record<string, string> = {
-      ...DEFAULT_HEADERS,
+      ...this.helper.generateDynamicHeaders(BASE_HEADERS),
       Authorization: `Bearer ${this.getToken()}`,
       'X-Request-Id': uuid(),
     }
@@ -342,6 +336,9 @@ export class QwenAiAdapter {
     console.log('[QwenAI] Request payload:', JSON.stringify(payload, null, 2))
     console.log('[QwenAI] Request headers:', JSON.stringify(this.getHeaders(chatId), null, 2))
 
+    // Wait for rate limit before making request
+    await this.helper.waitForRateLimit()
+
     const response = await this.axiosInstance.post(url, payload, {
       headers: {
         ...this.getHeaders(chatId),
@@ -353,6 +350,12 @@ export class QwenAiAdapter {
 
     console.log('[QwenAI] Response status:', response.status)
     console.log('[QwenAI] Response headers:', JSON.stringify(response.headers, null, 2))
+
+    // Store cookies from response headers if available
+    const setCookieHeader = response.headers?.['set-cookie']
+    if (setCookieHeader) {
+      this.helper.storeCookies(setCookieHeader)
+    }
 
     return {
       response,

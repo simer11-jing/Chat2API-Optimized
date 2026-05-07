@@ -10,27 +10,20 @@ import axios, { AxiosResponse } from 'axios'
 import { getDeepSeekHash } from '../../lib/challenge'
 import type { Account, Provider } from '../../store/types'
 import { resolveDeepSeekChatOptions } from './providerModelOptions'
+import { BaseAdapterHelper } from './baseAdapter'
 
 const DEEPSEEK_API_BASE = 'https://chat.deepseek.com/api'
 
-const FAKE_HEADERS = {
+const BASE_HEADERS = {
   Accept: '*/*',
   'Accept-Encoding': 'gzip, deflate, br, zstd',
   'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
-  Origin: 'https://chat.deepseek.com',
-  Referer: 'https://chat.deepseek.com/',
-  'Sec-Ch-Ua': '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
-  'Sec-Ch-Ua-Mobile': '?0',
-  'Sec-Ch-Ua-Platform': '"macOS"',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
   'Sec-Fetch-Site': 'same-origin',
-  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
-  'X-App-Version': '20241129.1',
   'X-Client-Locale': 'zh-CN',
   'X-Client-Platform': 'web',
   'x-Client-Timezone-Offset': '28800',
-  'X-Client-Version': '1.8.0',
 }
 
 interface TokenInfo {
@@ -92,26 +85,29 @@ function uuid(): string {
   })
 }
 
-function generateCookie(): string {
-  const timestamp = Date.now()
-  return `intercom-HWWAFSESTIME=${timestamp}; HWWAFSESID=${generateRandomString(18, 'hex')}; Hm_lvt_${uuid(false)}=${Math.floor(timestamp / 1000)},${Math.floor(timestamp / 1000)},${Math.floor(timestamp / 1000)}; Hm_lpvt_${uuid(false)}=${Math.floor(timestamp / 1000)}; _frid=${uuid(false)}; _fr_ssid=${uuid(false)}; _fr_pvid=${uuid(false)}`
-}
-
 function unixTimestamp(): number {
   return Math.floor(Date.now() / 1000)
+}
+
+function buildDynamicHeaders(helper: BaseAdapterHelper): Record<string, string> {
+  return helper.generateDynamicHeaders({
+    ...BASE_HEADERS,
+    Origin: 'https://chat.deepseek.com',
+    Referer: 'https://chat.deepseek.com/',
+  })
 }
 
 export class DeepSeekAdapter {
   private provider: Provider
   private account: Account
   private token: string
+  private helper: BaseAdapterHelper
 
   constructor(provider: Provider, account: Account) {
     this.provider = provider
     this.account = account
-    console.log('[DeepSeek] Account credentials:', JSON.stringify(account.credentials, null, 2))
     this.token = account.credentials.token || account.credentials.apiKey || account.credentials.refreshToken || ''
-    console.log('[DeepSeek] Using token:', this.token.substring(0, 20) + '...')
+    this.helper = new BaseAdapterHelper(account, provider, 'deepseek')
   }
 
   private async acquireToken(): Promise<string> {
@@ -125,18 +121,19 @@ export class DeepSeekAdapter {
     }
 
     console.log('[DeepSeek] Acquiring token...')
-    
+
+    const headers = buildDynamicHeaders(this.helper)
     const result = await axios.get(`${DEEPSEEK_API_BASE}/v0/users/current`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
-        ...FAKE_HEADERS,
+        ...headers,
       },
       timeout: 15000,
       validateStatus: () => true,
     })
 
     console.log('[DeepSeek] Token response status:', result.status)
-    
+
     if (result.status === 401 || result.status === 403) {
       throw new Error(`Token invalid or expired, please get a new Token`)
     }
@@ -145,7 +142,6 @@ export class DeepSeekAdapter {
       throw new Error(`Failed to acquire token: HTTP ${result.status}`)
     }
 
-    // Response structure: { code: 0, data: { biz_code: 0, biz_data: { token: "..." } } }
     const bizData = result.data?.data?.biz_data || result.data?.biz_data
     if (!bizData?.token) {
       const errorMsg = result.data?.msg || result.data?.data?.biz_msg || 'Unknown error'
@@ -154,11 +150,19 @@ export class DeepSeekAdapter {
     }
 
     const accessToken = bizData.token
+    // Jitter: 55-65 minutes instead of exactly 60
+    const jitterMinutes = 55 + Math.random() * 10
     tokenCache.set(this.token, {
       accessToken,
       refreshToken: this.token,
-      expiresAt: unixTimestamp() + 3600,
+      expiresAt: unixTimestamp() + Math.floor(jitterMinutes * 60),
     })
+
+    // Store any cookies from response
+    const setCookie = result.headers?.['set-cookie']
+    if (setCookie) {
+      this.helper.storeCookies(setCookie)
+    }
 
     console.log('[DeepSeek] Token acquired successfully')
     return accessToken
@@ -171,24 +175,44 @@ export class DeepSeekAdapter {
       return cached.sessionId
     }
 
+    // Check for reusable session
+    const reusableSession = this.helper.getReusableSession()
+    if (reusableSession) {
+      console.log('[DeepSeek] Reusing existing session:', reusableSession)
+      sessionCache.set(cacheKey, { sessionId: reusableSession, createdAt: Date.now() })
+      return reusableSession
+    }
+
+    // Wait for rate limit
+    await this.helper.waitForRateLimit()
+
     const token = await this.acquireToken()
+    const headers = buildDynamicHeaders(this.helper)
+    const fingerprint = this.helper.getDeviceFingerprint()
+    const storedCookies = this.helper.getCookies('deepseek.com')
+
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat_session/create`,
       {},
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          ...FAKE_HEADERS,
-          Cookie: generateCookie(),
+          ...headers,
+          Cookie: storedCookies || `device_id=${fingerprint.deviceId}`,
         },
         timeout: 15000,
         validateStatus: () => true,
       }
     )
 
+    // Store cookies from response
+    const setCookie = result.headers?.['set-cookie']
+    if (setCookie) {
+      this.helper.storeCookies(setCookie)
+    }
+
     console.log('[DeepSeek] Create session response:', JSON.stringify(result.data, null, 2))
 
-    // Response structure: { code: 0, data: { biz_code: 0, biz_data: { id: "..." } } }
     const bizData = result.data?.data?.biz_data || result.data?.biz_data
     if (result.status !== 200 || !bizData?.chat_session?.id) {
       throw new Error(`Failed to create session: ${result.data?.msg || result.data?.data?.biz_msg || result.status}`)
@@ -197,19 +221,23 @@ export class DeepSeekAdapter {
     const sessionId = bizData?.chat_session?.id
     sessionCache.set(cacheKey, { sessionId, createdAt: Date.now() })
 
+    // Store session for reuse
+    this.helper.storeSession(sessionId, 300000)
+
     return sessionId
   }
 
   async deleteSession(sessionId: string): Promise<boolean> {
     try {
       const token = await this.acquireToken()
+      const headers = buildDynamicHeaders(this.helper)
       const result = await axios.post(
         `${DEEPSEEK_API_BASE}/v0/chat_session/delete`,
         { chat_session_id: sessionId },
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            ...FAKE_HEADERS,
+            ...headers,
           },
           timeout: 15000,
           validateStatus: () => true,
@@ -234,13 +262,14 @@ export class DeepSeekAdapter {
 
   private async getChallenge(targetPath: string): Promise<ChallengeResponse> {
     const token = await this.acquireToken()
+    const headers = buildDynamicHeaders(this.helper)
     const result = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/create_pow_challenge`,
       { target_path: targetPath },
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          ...FAKE_HEADERS,
+          ...headers,
         },
         timeout: 15000,
         validateStatus: () => true,
@@ -372,15 +401,13 @@ ${message.content || ''}
 
   async chatCompletion(request: ChatCompletionRequest): Promise<{ response: AxiosResponse; sessionId: string }> {
     const token = await this.acquireToken()
-    
+
     const sessionId = await this.createSession()
     console.log('[DeepSeek] Created new session:', sessionId)
-    
+
     const challenge = await this.getChallenge('/api/v0/chat/completion')
     const challengeAnswer = await this.calculateChallengeAnswer(challenge)
 
-    // Clone messages to avoid modifying original request
-    // Note: Tool prompt injection is already handled by Forwarder.transformRequestForPromptToolUse()
     const messages = [...request.messages]
 
     let prompt = this.messagesToPrompt(messages, false)
@@ -394,6 +421,14 @@ ${message.content || ''}
     if (request.reasoning_effort || thinkingEnabled) {
       console.log('[DeepSeek] Reasoning mode enabled, effort:', request.reasoning_effort)
     }
+
+    // Wait for rate limit before making the main request
+    await this.helper.waitForRateLimit()
+    await this.helper.addJitter(500, 1500)
+
+    const headers = buildDynamicHeaders(this.helper)
+    const fingerprint = this.helper.getDeviceFingerprint()
+    const storedCookies = this.helper.getCookies('deepseek.com')
 
     const response = await axios.post(
       `${DEEPSEEK_API_BASE}/v0/chat/completion`,
@@ -410,8 +445,8 @@ ${message.content || ''}
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          ...FAKE_HEADERS,
-          Cookie: generateCookie(),
+          ...headers,
+          Cookie: storedCookies || `device_id=${fingerprint.deviceId}`,
           'X-Ds-Pow-Response': challengeAnswer,
         },
         timeout: 120000,
@@ -420,19 +455,26 @@ ${message.content || ''}
       }
     )
 
+    // Store cookies from response
+    const setCookie = response.headers?.['set-cookie']
+    if (setCookie) {
+      this.helper.storeCookies(setCookie)
+    }
+
     return { response, sessionId }
   }
 
   async deleteAllChats(): Promise<boolean> {
     try {
       const token = await this.acquireToken()
+      const headers = buildDynamicHeaders(this.helper)
       const result = await axios.post(
         `${DEEPSEEK_API_BASE}/v0/chat_session/delete_all`,
         {},
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            ...FAKE_HEADERS,
+            ...headers,
           },
           timeout: 30000,
           validateStatus: () => true,

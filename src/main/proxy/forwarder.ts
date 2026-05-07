@@ -32,6 +32,7 @@ import { parseToolCalls } from './utils/toolParser/index'
 import { promptInjectionService } from './services/promptInjectionService'
 import { sessionManager } from './sessionManager'
 import { cleanClientToolPrompts } from './utils/promptSignatures'
+import { antiDetectionService } from './services/antiDetectionService'
 import {
   createContextManagementService,
   SummaryGenerator,
@@ -431,7 +432,15 @@ CRITICAL RULES:
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        await this.delay(5000)
+        // Exponential backoff with jitter instead of fixed 5s delay
+        const baseDelay = 2000
+        const maxDelay = 30000
+        const delay = Math.min(
+          baseDelay * Math.pow(2, attempt) + Math.random() * baseDelay,
+          maxDelay
+        )
+        console.log(`[Forwarder] Retry ${attempt}/${maxRetries} after ${Math.round(delay)}ms`)
+        await this.delay(delay)
       }
 
       let modifiedRequest = request
