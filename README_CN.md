@@ -71,6 +71,57 @@
 | Windows               | `Chat2API-x.x.x-x64-setup.exe`         |
 | Linux                 | `Chat2API-x.x.x-x64.AppImage` 或 `.deb` |
 
+### Docker 部署（推荐服务器/无桌面环境使用）
+
+**快速启动：**
+
+```bash
+docker run -d \
+  --name chat2api \
+  --restart unless-stopped \
+  -p 5800:5800 \
+  -p 9091:8080 \
+  -v /root/.chat2api:/root/.chat2api \
+  -e TZ=Asia/Shanghai \
+  yilee01/chat2api:latest
+```
+
+**使用 Docker Compose：**
+
+```bash
+# 克隆仓库
+git clone https://github.com/simer11-jing/Chat2API-Optimized.git
+cd Chat2API-Optimized
+
+# 启动服务
+docker compose up -d
+```
+
+**端口说明：**
+
+| 端口 | 用途 |
+|------|------|
+| `5800` | Web VNC 管理界面（浏览器访问 `http://IP:5800` 配置供应商和账户） |
+| `9091` | OpenAI 兼容 API 端口（供客户端调用） |
+
+**首次使用：**
+
+1. 浏览器打开 `http://IP:5800`，进入 Chat2API 管理界面
+2. 添加供应商并配置认证凭证
+3. 启动代理服务
+4. 客户端使用 `http://IP:9091/v1` 作为 API Base URL
+
+**自定义构建：**
+
+```bash
+# 需要先构建 Electron 应用
+npm install
+npm run build:linux
+
+# 构建 Docker 镜像
+docker build -t chat2api:custom .
+```
+
 ### 从源码构建
 
 **环境要求：**

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  chat2api:
+    image: yilee01/chat2api:latest
+    container_name: chat2api
+    restart: unless-stopped
+    ports:
+      - "5800:5800"   # Web VNC 管理界面
+      - "9091:8080"   # OpenAI 兼容 API
+    volumes:
+      - chat2api-data:/root/.chat2api
+    environment:
+      - TZ=Asia/Shanghai
+      - KEEP_APP_RUNNING=1
+      - DISPLAY_WIDTH=1920
+      - DISPLAY_HEIGHT=1080
+      - APP_NAME=Chat2API
+      - APP_VERSION=1.2.0
+
+volumes:
+  chat2api-data:
+    driver: local

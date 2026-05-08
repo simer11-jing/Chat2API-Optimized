@@ -1,0 +1,7 @@
+{
+  "icons": [
+    { "src": "/android-chrome-192x192.png?v=75c9cc5d7c", "type": "image/png", "sizes": "192x192" },
+    { "src": "/android-chrome-512x512.png?v=75c9cc5d7c", "type": "image/png", "sizes": "512x512" },
+    { "src": "/android-chrome-512x512-mask.png?v=75c9cc5d7c", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}

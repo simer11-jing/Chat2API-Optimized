@@ -71,6 +71,55 @@ Download the latest release from [GitHub Releases](https://github.com/xiaoY233/C
 | Windows               | `Chat2API-x.x.x-x64-setup.exe`          |
 | Linux                 | `Chat2API-x.x.x-x64.AppImage` or `.deb` |
 
+### Docker Deployment (Recommended for Servers)
+
+**Quick Start:**
+
+```bash
+docker run -d \
+  --name chat2api \
+  --restart unless-stopped \
+  -p 5800:5800 \
+  -p 9091:8080 \
+  -v /root/.chat2api:/root/.chat2api \
+  -e TZ=Asia/Shanghai \
+  yilee01/chat2api:latest
+```
+
+**Using Docker Compose:**
+
+```bash
+git clone https://github.com/simer11-jing/Chat2API-Optimized.git
+cd Chat2API-Optimized
+
+docker compose up -d
+```
+
+**Port Mapping:**
+
+| Port | Purpose |
+|------|---------|
+| `5800` | Web VNC management UI (configure providers and accounts via browser at `http://IP:5800`) |
+| `9091` | OpenAI-compatible API port (for client connections) |
+
+**First-time Setup:**
+
+1. Open `http://IP:5800` in your browser to access the Chat2API management UI
+2. Add a provider and configure authentication credentials
+3. Start the proxy service
+4. Use `http://IP:9091/v1` as the API Base URL in your client
+
+**Custom Build:**
+
+```bash
+# Build the Electron app first
+npm install
+npm run build:linux
+
+# Build Docker image
+docker build -t chat2api:custom .
+```
+
 ### Build from Source
 
 **Requirements:**

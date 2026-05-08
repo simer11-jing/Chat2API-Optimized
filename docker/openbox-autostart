@@ -1,0 +1,15 @@
+# Wait for Chat2API window then maximize it
+(
+  for i in $(seq 1 30); do
+    WID=$(xdotool search --onlyvisible --class "chat2api" 2>/dev/null | head -1)
+    if [ -n "$WID" ]; then
+      xdotool windowsize "$WID" 100% 100%
+      xdotool windowmove "$WID" 0 0
+      break
+    fi
+    sleep 0.5
+  done
+) &
+
+# Solid background
+xsetroot -solid "#1e1e2e" &
